@@ -6,7 +6,7 @@ import { DRAFT_TARGET_ID, type MapTargetView, type MapPoiView } from "../map/typ
 import { ringFor } from "../lib/anchorRing.js";
 import { geocode, type GeocodeHit } from "../lib/geocode.js";
 import { haversineMiles } from "../../server/engine/geo.js";
-import { AnchorTree, type AnchorTreeNode, type DropZone } from "../components/AnchorTree.js";
+import { TargetTree, type TargetTreeNode, type DropZone } from "../components/TargetTree.js";
 import { VL_STYLES } from "../styles.js";
 
 /**
@@ -141,7 +141,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     setSearching(true);
     const t = setTimeout(() => {
       void geocode(search).then((r) => {
-        setHits(r);
+        setHits(r.hits);
         setSearching(false);
       });
     }, 400);
@@ -269,7 +269,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
   };
 
   /** Map the domain tree onto the presentational tree the DnD control wants. */
-  const toTreeNode = (a: AnchorNodeView): AnchorTreeNode => ({
+  const toTreeNode = (a: AnchorNodeView): TargetTreeNode => ({
     id: a.id,
     parentId: a.parentId,
     name: a.name,
@@ -283,6 +283,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
         : `day ${String(a.pacing.etaDays)}`
       : null,
     behind: a.pacing?.behind ?? false,
+    ordinal: null,
     children: a.children.map(toTreeNode),
   });
 
@@ -371,7 +372,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
           {anchors.length === 0 ? (
             <p style={{ color: "#666" }}>No anchors yet — the route runs straight to the destination.</p>
           ) : (
-            <AnchorTree
+            <TargetTree
               nodes={anchors.map(toTreeNode)}
               selectedId={selectedId}
               onSelect={(id) => {

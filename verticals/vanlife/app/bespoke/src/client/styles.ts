@@ -80,6 +80,16 @@ export const VL_STYLES = `
   padding: 8px 4px; font-size: .9rem; font-weight: 600; color: #6b7280; cursor: pointer; }
 .vl-tab-active { color: #0f766e; border-bottom-color: #0f766e; }
 
+.vl-target-ordinal { color: #6b7280; font-variant-numeric: tabular-nums; min-width: 14px; }
+/* The trip's destination: same row shape as a Target, visibly the end of it. */
+.vl-target-final { border-color: #b45309; background: #fffbeb; }
+.vl-target-final .vl-chip-final { background: #b45309; color: #fff; }
+.vl-origin-row { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px;
+  border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; }
+.vl-origin-row strong { flex: 1; }
+.vl-trip-picker { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.vl-trip-picker select { flex: 1; padding: 6px; }
+
 /* A failed basemap must say so rather than render as a silent grey rectangle. */
 /* Sits below the digest banner rather than over it. */
 .vl-basemap-error { position: absolute; top: 56px; left: 50%; transform: translateX(-50%);

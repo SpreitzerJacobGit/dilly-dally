@@ -1,12 +1,15 @@
 /**
- * Place-name lookup for anchor authoring, via Nominatim.
+ * Place-name lookup for Target authoring, via Nominatim.
  *
  * Same OSM family as the Overpass place data, and keyless. Its usage policy
  * asks for an identifying User-Agent and no more than one request a second, so
  * calls are serialised behind a shared gate rather than fired per keystroke —
- * the caller is expected to debounce as well. Failures are returned, never
- * thrown: not finding "the eastern Sierra" should read as an empty list, not a
- * broken page.
+ * the caller is expected to debounce as well.
+ *
+ * Failures are returned, never thrown — but they are returned *as failures*.
+ * This is the one lookup in the app that leaves the van, and an empty list is
+ * the correct answer to "no such place" and a lie about "the uplink is down".
+ * Callers are expected to show the error and offer coordinates instead.
  */
 
 const ENDPOINT = "https://nominatim.openstreetmap.org/search";
@@ -51,9 +54,15 @@ function radiusFromBbox(bbox: NominatimRow["boundingbox"], lat: number): number 
   return Math.min(400, Math.max(5, Math.round(half)));
 }
 
-export async function geocode(query: string, limit = 5): Promise<GeocodeHit[]> {
+export interface GeocodeResult {
+  hits: GeocodeHit[];
+  /** Non-null when the lookup could not be made at all, as opposed to finding nothing. */
+  error: string | null;
+}
+
+export async function geocode(query: string, limit = 5): Promise<GeocodeResult> {
   const q = query.trim();
-  if (q.length < 3) return [];
+  if (q.length < 3) return { hits: [], error: null };
   try {
     return await throttled(async () => {
       const url = `${ENDPOINT}?q=${encodeURIComponent(q)}&format=json&limit=${String(limit)}`;
@@ -61,19 +70,22 @@ export async function geocode(query: string, limit = 5): Promise<GeocodeHit[]> {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) return [];
+      if (!res.ok) return { hits: [], error: `place search returned ${String(res.status)}` };
       const rows = (await res.json()) as NominatimRow[];
-      return rows.map((r) => {
-        const lat = Number(r.lat);
-        return {
-          name: r.display_name,
-          lat,
-          lng: Number(r.lon),
-          suggestedRadiusMiles: radiusFromBbox(r.boundingbox, lat),
-        };
-      });
+      return {
+        hits: rows.map((r) => {
+          const lat = Number(r.lat);
+          return {
+            name: r.display_name,
+            lat,
+            lng: Number(r.lon),
+            suggestedRadiusMiles: radiusFromBbox(r.boundingbox, lat),
+          };
+        }),
+        error: null,
+      };
     });
-  } catch {
-    return [];
+  } catch (err) {
+    return { hits: [], error: err instanceof Error ? err.message : "place search unreachable" };
   }
 }
