@@ -18,13 +18,21 @@ export const tripCreateSchema = z.object({
   startDate: z.iso.date().optional(),
 });
 
-export const waypointAddSchema = z.object({
-  tripId: z.number().int(),
-  name: z.string().min(1).max(120),
-  location: latLngSchema,
-  kind: z.enum(["family", "custom", "poi"]).default("custom"),
-  poiId: z.number().int().optional(),
-  notes: z.string().max(500).optional(),
+/**
+ * Editing a trip after creation. Every field is optional because the four
+ * things an operator changes — the name, the Origin, the final Target, and the
+ * pace — are edited independently and rarely together.
+ */
+export const tripUpdateSchema = z.object({
+  id: z.number().int(),
+  name: z.string().min(1).max(120).optional(),
+  originName: z.string().min(1).max(120).optional(),
+  origin: latLngSchema.optional(),
+  destName: z.string().min(1).max(120).optional(),
+  dest: latLngSchema.optional(),
+  dailyDriveHours: z.number().min(1).max(12).optional(),
+  deviationBudgetRatio: z.number().min(1).max(4).optional(),
+  startDate: z.iso.date().nullable().optional(),
 });
 
 /**

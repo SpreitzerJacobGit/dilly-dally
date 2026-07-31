@@ -35,13 +35,6 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
   });
   const setStatus = trpc.trips.setStatus.useMutation({ onSuccess: () => void utils.trips.invalidate() });
   const markWaypoint = trpc.trips.markWaypoint.useMutation({ onSuccess: () => void utils.trips.invalidate() });
-  const reorderWaypoints = trpc.trips.reorderWaypoints.useMutation({
-    onSuccess: () => void utils.trips.invalidate(),
-  });
-  const addWaypoint = trpc.trips.addWaypoint.useMutation({
-    onSuccess: () => void utils.trips.invalidate(),
-    onError: (e) => setToast(e.message),
-  });
   const markPoi = trpc.plan.markPoi.useMutation({ onSuccess: () => void utils.plan.fanout.invalidate() });
   const setPosition = trpc.trips.setPosition.useMutation({
     onSuccess: () => {
@@ -57,7 +50,7 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
     },
   });
 
-  const [activeForm, setActiveForm] = useState<"new-trip" | "add-waypoint" | "set-position" | null>(null);
+  const [activeForm, setActiveForm] = useState<"new-trip" | "set-position" | null>(null);
 
   const forms: JSX.Element | null =
     activeForm === "new-trip" ? (
@@ -84,25 +77,6 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
             dest: { lat: Number(v.destLat), lng: Number(v.destLng) },
             dailyDriveHours: Number(v.dailyDriveHours),
             deviationBudgetRatio: 2,
-          })
-        }
-        onClose={() => setActiveForm(null)}
-      />
-    ) : activeForm === "add-waypoint" && active.data ? (
-      <FormModal
-        title="Add waypoint"
-        fields={[
-          { name: "name", label: "Name", placeholder: "Family stop", required: true },
-          { name: "lat", label: "Latitude", type: "number", min: -90, max: 90, required: true },
-          { name: "lng", label: "Longitude", type: "number", min: -180, max: 180, required: true },
-        ]}
-        submitLabel="Add"
-        onSubmit={(v) =>
-          addWaypoint.mutate({
-            tripId: active.data!.id,
-            name: v.name!,
-            location: { lat: Number(v.lat), lng: Number(v.lng) },
-            kind: "custom",
           })
         }
         onClose={() => setActiveForm(null)}
@@ -197,9 +171,6 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
         <button className="vl-checkin-btn" onClick={() => setShowPreview(!showPreview)}>
           {showPreview ? "Hide digest preview" : "Preview digest"}
         </button>
-        <button className="vl-checkin-btn" onClick={() => setActiveForm("add-waypoint")}>
-          Add waypoint
-        </button>
       </div>
 
       {showPreview && preview.data ? (
@@ -219,42 +190,6 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
       <DataTable
         columns={[
           { key: "order", header: "#", render: (w) => w.orderIndex + 1 },
-          {
-            key: "move",
-            header: "",
-            render: (w) => (
-              <span style={{ display: "inline-flex", gap: 2 }}>
-                <button
-                  className="vl-checkin-btn"
-                  style={{ padding: "0 6px" }}
-                  title="Move earlier"
-                  onClick={() => {
-                    const ids = (t?.waypoints ?? []).map((x) => x.id);
-                    const i = ids.indexOf(w.id);
-                    if (i <= 0) return;
-                    [ids[i - 1], ids[i]] = [ids[i]!, ids[i - 1]!];
-                    reorderWaypoints.mutate({ tripId: active.data!.id, orderedIds: ids });
-                  }}
-                >
-                  ↑
-                </button>
-                <button
-                  className="vl-checkin-btn"
-                  style={{ padding: "0 6px" }}
-                  title="Move later"
-                  onClick={() => {
-                    const ids = (t?.waypoints ?? []).map((x) => x.id);
-                    const i = ids.indexOf(w.id);
-                    if (i < 0 || i >= ids.length - 1) return;
-                    [ids[i], ids[i + 1]] = [ids[i + 1]!, ids[i]!];
-                    reorderWaypoints.mutate({ tripId: active.data!.id, orderedIds: ids });
-                  }}
-                >
-                  ↓
-                </button>
-              </span>
-            ),
-          },
           { key: "name", header: "Anchor", render: (w) => w.name },
           {
             key: "radius",

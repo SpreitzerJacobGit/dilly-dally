@@ -37,7 +37,7 @@ import {
   needConfigureSchema,
   rateSetSchema,
   tripCreateSchema,
-  waypointAddSchema,
+  tripUpdateSchema,
 } from "./schemas.js";
 import { checkInHistory, loadNeedStates } from "./engine/needs.js";
 import {
@@ -67,6 +67,7 @@ import {
   subtreeIds,
 } from "./engine/anchors.js";
 import { osrmRoute, OsrmUnavailableError } from "./engine/osrm.js";
+import { applyTripUpdate, deleteTrip, shouldPushWarnings } from "./engine/trips.js";
 import {
   composeDigest,
   DIGEST_SETTINGS_KEY,
@@ -244,6 +245,37 @@ export const tripsRouter = router({
     }),
   ),
 
+  /**
+   * Edit the trip's name, Origin, final Target, or pace. Moving an endpoint
+   * resets the frozen baseline; renaming does not — see engine/trips.ts.
+   */
+  update: op.input(tripUpdateSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const trip = await tripOr404(db, input.id);
+      const editsRoute =
+        input.origin !== undefined ||
+        input.dest !== undefined ||
+        input.deviationBudgetRatio !== undefined ||
+        input.dailyDriveHours !== undefined;
+      if (editsRoute && (trip.status === "completed" || trip.status === "archived")) {
+        rejectIntake("A completed trip's route can't be edited — its history is the record.");
+      }
+      return applyTripUpdate(db, input);
+    }),
+  ),
+
+  delete: op.input(z.object({ id: z.number().int() })).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const trip = await tripOr404(db, input.id);
+      if (trip.status === "active") {
+        rejectIntake(
+          "This is the trip the van is on; the morning digest and needs runway follow it. Complete it first.",
+        );
+      }
+      return deleteTrip(db, input.id);
+    }),
+  ),
+
   setStatus: op
     .input(z.object({ id: z.number().int(), status: z.enum(["planning", "active", "completed", "archived"]) }))
     .mutation(
@@ -263,33 +295,6 @@ export const tripsRouter = router({
       }),
     ),
 
-  addWaypoint: op.input(waypointAddSchema).mutation(
-    intakeWrite(async ({ db, input }) => {
-      await tripOr404(db, input.tripId);
-      const maxOrder = await db
-        .select({ orderIndex: waypoints.orderIndex })
-        .from(waypoints)
-        .where(eq(waypoints.tripId, input.tripId))
-        .orderBy(desc(waypoints.orderIndex))
-        .limit(1);
-      const inserted = await db
-        .insert(waypoints)
-        .values({
-          tripId: input.tripId,
-          name: input.name,
-          lat: input.location.lat,
-          lng: input.location.lng,
-          kind: input.kind,
-          poiId: input.poiId ?? null,
-          orderIndex: (maxOrder[0]?.orderIndex ?? -1) + 1,
-          notes: input.notes ?? null,
-          createdAt: nowIso(),
-        })
-        .returning({ id: waypoints.id });
-      return { id: inserted[0]!.id };
-    }),
-  ),
-
   markWaypoint: op
     .input(z.object({ id: z.number().int(), status: z.enum(["pending", "visited", "skipped"]) }))
     .mutation(
@@ -301,20 +306,6 @@ export const tripsRouter = router({
           .returning({ id: waypoints.id });
         if (updated.length === 0) rejectIntake("Waypoint not found");
         return { id: input.id };
-      }),
-    ),
-
-  reorderWaypoints: op
-    .input(z.object({ tripId: z.number().int(), orderedIds: z.array(z.number().int()).max(100) }))
-    .mutation(
-      intakeWrite(async ({ db, input }) => {
-        for (let i = 0; i < input.orderedIds.length; i++) {
-          await db
-            .update(waypoints)
-            .set({ orderIndex: i })
-            .where(and(eq(waypoints.id, input.orderedIds[i]!), eq(waypoints.tripId, input.tripId)));
-        }
-        return { tripId: input.tripId };
       }),
     ),
 
@@ -656,7 +647,7 @@ async function candidatesWithLegs(db: Parameters<typeof loadNeedStates>[0], trip
 export const planRouter = router({
   today: op.input(z.object({ tripId: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     const date = planDateOf(nowIso());
     let stale = false;
     let message: string | null = null;
@@ -665,7 +656,9 @@ export const planRouter = router({
       try {
         const built = await buildDailyCandidates(db, trip, nowIso());
         await persistCandidates(db, trip.id, date, built);
-        await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+        if (shouldPushWarnings(trip)) {
+          await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+        }
         candidates = await candidatesWithLegs(db, trip.id, date);
       } catch (err) {
         if (!(err instanceof OsrmUnavailableError)) throw err;
@@ -686,7 +679,7 @@ export const planRouter = router({
 
   replan: op.input(z.object({ tripId: z.number().int() })).mutation(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     const date = planDateOf(nowIso());
     // ROUTE-5: with no check-in, selection, position, or other state change
     // since today's build, replan is a read — serve the persisted candidates
@@ -701,7 +694,9 @@ export const planRouter = router({
     try {
       const built = await buildDailyCandidates(db, trip, nowIso());
       await persistCandidates(db, trip.id, date, built);
-      await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+      if (shouldPushWarnings(trip)) {
+        await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+      }
     } catch (err) {
       if (err instanceof OsrmUnavailableError) {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
@@ -1022,13 +1017,13 @@ export const digestRouter = router({
 
   preview: op.input(z.object({ tripId: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     return composeDigest(db, trip, nowIso());
   }),
 
   sendNow: op.input(z.object({ tripId: z.number().int() })).mutation(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     return generateAndDeliverDigest(ctx.dbHandle, ctx.logger, trip, nowIso(), { forcePush: true });
   }),
 
