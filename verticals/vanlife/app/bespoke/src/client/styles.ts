@@ -62,6 +62,15 @@ export const VL_STYLES = `
   border: 3px solid #fff; box-shadow: 0 0 0 4px #2563eb44; animation: vl-pulse 2s infinite; }
 @keyframes vl-pulse { 0% { box-shadow: 0 0 0 4px #2563eb44; } 50% { box-shadow: 0 0 0 10px #2563eb11; } 100% { box-shadow: 0 0 0 4px #2563eb44; } }
 
+/* A failed basemap must say so rather than render as a silent grey rectangle. */
+/* Sits below the digest banner rather than over it. */
+.vl-basemap-error { position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 5; max-width: 420px; display: flex; flex-direction: column; gap: 2px;
+  background: #fef3c7; border: 1px solid #d97706; border-radius: 8px; padding: 8px 12px;
+  font-size: .85rem; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.vl-basemap-error span { word-break: break-word; }
+.vl-basemap-error-hint { color: #6b5200; }
+
 .vl-toast { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: #1f2937; color: #fff; border-radius: 8px; padding: 10px 14px; font-size: .9rem;
   display: flex; gap: 12px; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
