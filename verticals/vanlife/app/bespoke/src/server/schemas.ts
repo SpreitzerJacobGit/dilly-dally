@@ -40,7 +40,7 @@ export const tripUpdateSchema = z.object({
  * plain waypoint has always had — and anything larger is a region the route
  * must pass through.
  */
-export const anchorAddSchema = z.object({
+export const targetAddSchema = z.object({
   tripId: z.number().int(),
   name: z.string().min(1).max(120),
   center: latLngSchema,
@@ -52,7 +52,7 @@ export const anchorAddSchema = z.object({
   notes: z.string().max(500).optional(),
 });
 
-export const anchorUpdateSchema = z.object({
+export const targetUpdateSchema = z.object({
   id: z.number().int(),
   name: z.string().min(1).max(120).optional(),
   center: latLngSchema.optional(),
@@ -61,28 +61,28 @@ export const anchorUpdateSchema = z.object({
   notes: z.string().max(500).nullable().optional(),
 });
 
-export const anchorPinSchema = z.object({
+export const targetPinSchema = z.object({
   id: z.number().int(),
   /** null clears the pin and returns the anchor to automatic resolution. */
   point: latLngSchema.nullable(),
   poiId: z.number().int().nullable().default(null),
 });
 
-export const anchorPromoteSchema = z.object({
+export const targetPromoteSchema = z.object({
   parentId: z.number().int(),
   poiId: z.number().int(),
   radiusMiles: z.number().min(0).max(100).default(0),
   name: z.string().min(1).max(120).optional(),
 });
 
-export const anchorReparentSchema = z.object({
+export const targetReparentSchema = z.object({
   id: z.number().int(),
   /** null drops the anchor at the top level. */
   parentId: z.number().int().nullable(),
   orderIndex: z.number().int().min(0).max(999).default(0),
 });
 
-export const anchorReorderSchema = z.object({
+export const targetReorderSchema = z.object({
   tripId: z.number().int(),
   parentId: z.number().int().nullable().default(null),
   orderedIds: z.array(z.number().int()).max(100),

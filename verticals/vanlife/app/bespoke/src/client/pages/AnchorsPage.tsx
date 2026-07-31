@@ -87,12 +87,13 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [fitKey, setFitKey] = useState("init");
 
-  const anchors = (tripQ.data?.anchors ?? []) as unknown as AnchorNodeView[];
+  // The final Target is the trip's destination, not an editable region.
+  const anchors = ((tripQ.data?.targets ?? []).filter((t) => !t.final)) as unknown as AnchorNodeView[];
   const flat = useMemo(() => flatten(anchors), [anchors]);
   const selected = flat.find((a) => a.id === selectedId) ?? null;
 
-  const suggestionsQ = trpc.trips.anchorSuggestions.useQuery(
-    { anchorId: selectedId ?? 0 },
+  const suggestionsQ = trpc.trips.targetSuggestions.useQuery(
+    { targetId: selectedId ?? 0 },
     { enabled: selectedId !== null && (selected?.radiusMiles ?? 0) > 0 },
   );
 
@@ -102,7 +103,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
   };
   const onErr = (e: { message: string }): void => setError(e.message);
 
-  const addMut = trpc.trips.addAnchor.useMutation({
+  const addMut = trpc.trips.addTarget.useMutation({
     onSuccess: () => {
       setDraft(null);
       setPlacing(null);
@@ -111,25 +112,25 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     },
     onError: onErr,
   });
-  const updateMut = trpc.trips.updateAnchor.useMutation({ onSuccess: invalidate, onError: onErr });
-  const removeMut = trpc.trips.removeAnchor.useMutation({
+  const updateMut = trpc.trips.updateTarget.useMutation({ onSuccess: invalidate, onError: onErr });
+  const removeMut = trpc.trips.removeTarget.useMutation({
     onSuccess: () => {
       setSelectedId(null);
       invalidate();
     },
     onError: onErr,
   });
-  const promoteMut = trpc.trips.promotePoiToAnchor.useMutation({ onSuccess: invalidate, onError: onErr });
-  const pinMut = trpc.trips.pinAnchorPoint.useMutation({ onSuccess: invalidate, onError: onErr });
-  const markMut = trpc.trips.markWaypoint.useMutation({ onSuccess: invalidate, onError: onErr });
-  const reparentMut = trpc.trips.reparentAnchor.useMutation({
+  const promoteMut = trpc.trips.promotePoiToTarget.useMutation({ onSuccess: invalidate, onError: onErr });
+  const pinMut = trpc.trips.pinTargetPoint.useMutation({ onSuccess: invalidate, onError: onErr });
+  const markMut = trpc.trips.markTarget.useMutation({ onSuccess: invalidate, onError: onErr });
+  const reparentMut = trpc.trips.reparentTarget.useMutation({
     onSuccess: () => {
       setError(null);
       invalidate();
     },
     onError: onErr,
   });
-  const reorderMut = trpc.trips.reorderAnchors.useMutation({ onSuccess: invalidate, onError: onErr });
+  const reorderMut = trpc.trips.reorderTargets.useMutation({ onSuccess: invalidate, onError: onErr });
 
   // Debounced place-name lookup; geocode() also throttles globally.
   useEffect(() => {

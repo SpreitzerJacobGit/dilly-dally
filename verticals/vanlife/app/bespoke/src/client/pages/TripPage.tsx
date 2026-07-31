@@ -34,7 +34,7 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
     onError: (e) => setToast(e.message),
   });
   const setStatus = trpc.trips.setStatus.useMutation({ onSuccess: () => void utils.trips.invalidate() });
-  const markWaypoint = trpc.trips.markWaypoint.useMutation({ onSuccess: () => void utils.trips.invalidate() });
+  const markTarget = trpc.trips.markTarget.useMutation({ onSuccess: () => void utils.trips.invalidate() });
   const markPoi = trpc.plan.markPoi.useMutation({ onSuccess: () => void utils.plan.fanout.invalidate() });
   const setPosition = trpc.trips.setPosition.useMutation({
     onSuccess: () => {
@@ -122,9 +122,9 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
   // Resolution is computed server-side per read, so flatten the tree to look
   // up what each anchor actually routes through.
   const anchorById = new Map(
-    (function flat(ns: NonNullable<typeof t>["anchors"]): NonNullable<typeof t>["anchors"] {
+    (function flat(ns: NonNullable<typeof t>["targets"]): NonNullable<typeof t>["targets"] {
       return ns.flatMap((n) => [n, ...flat(n.children)]);
-    })(t?.anchors ?? []).map((a) => [a.id, a] as const),
+    })(t?.targets ?? []).map((a) => [a.id, a] as const),
   );
   const budget = t?.usage;
 
@@ -216,15 +216,15 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
             render: (w) =>
               w.status === "pending" ? (
                 <span style={{ display: "inline-flex", gap: 6 }}>
-                  <button className="vl-checkin-btn" onClick={() => markWaypoint.mutate({ id: w.id, status: "visited" })}>
+                  <button className="vl-checkin-btn" onClick={() => markTarget.mutate({ id: w.id, status: "visited" })}>
                     Visited
                   </button>
-                  <button className="vl-checkin-btn" onClick={() => markWaypoint.mutate({ id: w.id, status: "skipped" })}>
+                  <button className="vl-checkin-btn" onClick={() => markTarget.mutate({ id: w.id, status: "skipped" })}>
                     Skip
                   </button>
                 </span>
               ) : (
-                <button className="vl-checkin-btn" onClick={() => markWaypoint.mutate({ id: w.id, status: "pending" })}>
+                <button className="vl-checkin-btn" onClick={() => markTarget.mutate({ id: w.id, status: "pending" })}>
                   Restore
                 </button>
               ),
