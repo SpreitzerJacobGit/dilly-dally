@@ -26,6 +26,11 @@ import {
   waypoints,
 } from "../db/schema.js";
 import {
+  anchorAddSchema,
+  anchorPinSchema,
+  anchorPromoteSchema,
+  anchorReorderSchema,
+  anchorUpdateSchema,
   bboxSchema,
   checkInSchema,
   needConfigureSchema,
@@ -46,7 +51,17 @@ import {
   type CandidateWarning,
   type TripRow,
 } from "./engine/candidates.js";
-import { corridorPois } from "./engine/pois.js";
+import { anchorPois, anchorPoiPools, corridorPois } from "./engine/pois.js";
+import { circlePolygon, withinDisc } from "./engine/geo.js";
+import {
+  anchorHorizons,
+  findNode,
+  flattenPendingAnchors,
+  loadAnchorTree,
+  loadSiblings,
+  resolveAnchorChain,
+  subtreeIds,
+} from "./engine/anchors.js";
 import { osrmRoute, OsrmUnavailableError } from "./engine/osrm.js";
 import {
   composeDigest,
@@ -72,6 +87,93 @@ async function activeTrip(db: Parameters<typeof loadNeedStates>[0]) {
   return rows[0] ?? null;
 }
 
+export interface AnchorView {
+  id: number;
+  parentId: number | null;
+  name: string;
+  kind: string;
+  center: { lat: number; lng: number };
+  radiusMiles: number;
+  depth: number;
+  orderIndex: number;
+  status: string;
+  arriveBy: string | null;
+  notes: string | null;
+  /** Pre-computed circle so the map never does geometry. Null for exact points. */
+  ring: [number, number][] | null;
+  /** Where the route actually goes through — null when a parent is superseded by its children. */
+  resolved: {
+    point: { lat: number; lng: number };
+    via: string;
+    poiId: number | null;
+    poiName: string | null;
+    detourMinutes: number;
+  } | null;
+  pinned: { lat: number; lng: number } | null;
+  pacing: { etaDays: number; etaDate: string; horizon: string; behind: boolean } | null;
+  children: AnchorView[];
+}
+
+/**
+ * The anchor tree with resolution and pacing folded in. Resolution is computed
+ * per read and never stored — see engine/anchors.ts.
+ */
+async function anchorViewTree(
+  db: Parameters<typeof loadNeedStates>[0],
+  trip: { id: number; destLat: number; destLng: number; dailyDriveHours: number },
+  position: { lat: number; lng: number },
+): Promise<AnchorView[]> {
+  const tree = await loadAnchorTree(db, trip.id);
+  const chainAnchors = flattenPendingAnchors(tree);
+  const dest = { lat: trip.destLat, lng: trip.destLng };
+  const pools = await anchorPoiPools(db, {
+    tripId: trip.id,
+    anchors: chainAnchors.map((a) => ({ id: a.id, center: a.center, radiusMiles: a.radiusMiles })),
+    serviceCategories: [],
+  });
+  const resolved = resolveAnchorChain(chainAnchors, position, dest, pools);
+  const byAnchor = new Map(resolved.map((r) => [r.anchorId, r]));
+  const pacing = new Map(
+    anchorHorizons(resolved, chainAnchors, {
+      start: position,
+      dailyDriveHours: trip.dailyDriveHours,
+      now: nowIso(),
+    }).map((p) => [p.anchorId, p]),
+  );
+
+  const toView = (n: Awaited<ReturnType<typeof loadAnchorTree>>[number]): AnchorView => {
+    const r = byAnchor.get(n.id) ?? null;
+    const p = pacing.get(n.id) ?? null;
+    return {
+      id: n.id,
+      parentId: n.parentId,
+      name: n.name,
+      kind: n.kind,
+      center: n.center,
+      radiusMiles: n.radiusMiles,
+      depth: n.depth,
+      orderIndex: n.orderIndex,
+      status: n.status,
+      arriveBy: n.arriveBy,
+      notes: null,
+      ring: n.radiusMiles > 0 ? circlePolygon(n.center, n.radiusMiles) : null,
+      resolved: r
+        ? {
+            point: r.point,
+            via: r.via,
+            poiId: r.poiId,
+            poiName: r.poiName,
+            detourMinutes: Math.round(r.detourMinutes),
+          }
+        : null,
+      pinned: n.pinned,
+      pacing: p ? { etaDays: p.etaDays, etaDate: p.etaDate, horizon: p.horizon, behind: p.behind } : null,
+      children: n.children.map(toView),
+    };
+  };
+  return tree.map(toView);
+}
+
 export const tripsRouter = router({
   list: op.query(async ({ ctx }) =>
     ctx.dbHandle.db.select().from(trips).orderBy(desc(trips.createdAt)),
@@ -95,7 +197,8 @@ export const tripsRouter = router({
       .where(eq(progressEvents.tripId, trip.id))
       .orderBy(desc(progressEvents.occurredAt), desc(progressEvents.id))
       .limit(30);
-    return { ...trip, waypoints: wps, usage, position, recentProgress };
+    const anchors = await anchorViewTree(db, trip, position);
+    return { ...trip, waypoints: wps, anchors, usage, position, recentProgress };
   }),
 
   create: op.input(tripCreateSchema).mutation(
@@ -210,6 +313,198 @@ export const tripsRouter = router({
         return { tripId: input.tripId };
       }),
     ),
+
+  /* ── Anchors ─────────────────────────────────────────────────────────────
+   * A waypoint with a radius. Narrowing happens by adding a child, so the
+   * broad intent survives and deleting the child restores it.
+   */
+
+  addAnchor: op.input(anchorAddSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      await tripOr404(db, input.tripId);
+      let depth = 0;
+      if (input.parentId !== null) {
+        const parent = (await db.select().from(waypoints).where(eq(waypoints.id, input.parentId)))[0];
+        if (!parent) rejectIntake("That parent anchor no longer exists.");
+        if (parent!.tripId !== input.tripId) rejectIntake("That parent anchor belongs to another trip.");
+        if (parent!.depth >= 2) rejectIntake("Anchors nest three levels deep at most.");
+        if (input.radiusMiles >= parent!.radiusMiles && parent!.radiusMiles > 0) {
+          rejectIntake(
+            `A narrower anchor must be smaller than "${parent!.name}" (${String(parent!.radiusMiles)} mi).`,
+          );
+        }
+        depth = parent!.depth + 1;
+      }
+      const siblings = await loadSiblings(db, input.tripId, input.parentId);
+      const inserted = await db
+        .insert(waypoints)
+        .values({
+          tripId: input.tripId,
+          name: input.name,
+          lat: input.center.lat,
+          lng: input.center.lng,
+          radiusMiles: input.radiusMiles,
+          parentId: input.parentId,
+          depth,
+          kind: input.kind,
+          poiId: input.poiId ?? null,
+          orderIndex: (siblings[siblings.length - 1]?.orderIndex ?? -1) + 1,
+          arriveBy: input.arriveBy ?? null,
+          notes: input.notes ?? null,
+          createdAt: nowIso(),
+        })
+        .returning({ id: waypoints.id });
+      return { id: inserted[0]!.id };
+    }),
+  ),
+
+  updateAnchor: op.input(anchorUpdateSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
+      if (!row) rejectIntake("Anchor not found");
+      const center = input.center ?? { lat: row!.lat, lng: row!.lng };
+      const radius = input.radiusMiles ?? row!.radiusMiles;
+
+      // Shrinking must not orphan what is already inside: say which child or
+      // pin would fall out rather than silently moving it.
+      if (radius > 0) {
+        const kids = await db.select().from(waypoints).where(eq(waypoints.parentId, input.id));
+        for (const k of kids) {
+          if (!withinDisc({ lat: k.lat, lng: k.lng }, center, radius)) {
+            rejectIntake(`"${k.name}" would fall outside this anchor — move or remove it first.`);
+          }
+        }
+        if (row!.pinnedLat !== null && row!.pinnedLng !== null) {
+          if (!withinDisc({ lat: row!.pinnedLat, lng: row!.pinnedLng }, center, radius)) {
+            rejectIntake("The pinned spot would fall outside this anchor — clear the pin first.");
+          }
+        }
+      }
+
+      await db
+        .update(waypoints)
+        .set({
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.center !== undefined ? { lat: input.center.lat, lng: input.center.lng } : {}),
+          ...(input.radiusMiles !== undefined ? { radiusMiles: input.radiusMiles } : {}),
+          ...(input.arriveBy !== undefined ? { arriveBy: input.arriveBy } : {}),
+          ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        })
+        .where(eq(waypoints.id, input.id));
+      return { id: input.id };
+    }),
+  ),
+
+  removeAnchor: op.input(z.object({ id: z.number().int() })).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
+      if (!row) rejectIntake("Anchor not found");
+      // Delete the subtree explicitly, deepest first. The FK cascade would do
+      // it too, but being explicit means the count we report is the truth.
+      const tree = await loadAnchorTree(db, row!.tripId);
+      const node = findNode(tree, input.id);
+      const ids = node ? subtreeIds(node) : [input.id];
+      for (const id of [...ids].reverse()) {
+        await db.delete(waypoints).where(eq(waypoints.id, id));
+      }
+      return { removed: ids.length };
+    }),
+  ),
+
+  reorderAnchors: op.input(anchorReorderSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      for (let i = 0; i < input.orderedIds.length; i++) {
+        await db
+          .update(waypoints)
+          .set({ orderIndex: i })
+          .where(and(eq(waypoints.id, input.orderedIds[i]!), eq(waypoints.tripId, input.tripId)));
+      }
+      return { tripId: input.tripId };
+    }),
+  ),
+
+  pinAnchorPoint: op.input(anchorPinSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
+      if (!row) rejectIntake("Anchor not found");
+      if (input.point !== null) {
+        if (row!.radiusMiles <= 0) rejectIntake("An exact-point anchor has nothing to pin inside.");
+        if (!withinDisc(input.point, { lat: row!.lat, lng: row!.lng }, row!.radiusMiles)) {
+          rejectIntake("That spot is outside the anchor's area.");
+        }
+      }
+      await db
+        .update(waypoints)
+        .set({
+          pinnedLat: input.point?.lat ?? null,
+          pinnedLng: input.point?.lng ?? null,
+          pinnedPoiId: input.point === null ? null : input.poiId,
+        })
+        .where(eq(waypoints.id, input.id));
+      return { id: input.id };
+    }),
+  ),
+
+  /** The narrowing verb: a suggested place becomes a child anchor. */
+  promotePoiToAnchor: op.input(anchorPromoteSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const parent = (await db.select().from(waypoints).where(eq(waypoints.id, input.parentId)))[0];
+      if (!parent) rejectIntake("That anchor no longer exists.");
+      if (parent!.depth >= 2) rejectIntake("Anchors nest three levels deep at most.");
+      const poi = (await db.select().from(pois).where(eq(pois.id, input.poiId)))[0];
+      if (!poi) rejectIntake("That place no longer exists.");
+      if (parent!.radiusMiles > 0 && input.radiusMiles >= parent!.radiusMiles) {
+        rejectIntake(`A narrower anchor must be smaller than "${parent!.name}".`);
+      }
+      const siblings = await loadSiblings(db, parent!.tripId, parent!.id);
+      const inserted = await db
+        .insert(waypoints)
+        .values({
+          tripId: parent!.tripId,
+          name: input.name ?? poi!.name,
+          lat: poi!.lat,
+          lng: poi!.lng,
+          radiusMiles: input.radiusMiles,
+          parentId: parent!.id,
+          depth: parent!.depth + 1,
+          kind: "poi",
+          poiId: poi!.id,
+          orderIndex: (siblings[siblings.length - 1]?.orderIndex ?? -1) + 1,
+          createdAt: nowIso(),
+        })
+        .returning({ id: waypoints.id });
+      // Pin the place for the trip too, so the day engine already favours it.
+      await db
+        .insert(poiMarks)
+        .values({ tripId: parent!.tripId, poiId: poi!.id, mark: "pinned", createdAt: nowIso() })
+        .onConflictDoUpdate({
+          target: [poiMarks.tripId, poiMarks.poiId],
+          set: { mark: "pinned", createdAt: nowIso() },
+        });
+      return { id: inserted[0]!.id };
+    }),
+  ),
+
+  anchorSuggestions: op
+    .input(z.object({ anchorId: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      const db = ctx.dbHandle.db;
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.anchorId)))[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "anchor not found" });
+      const found = await anchorPois(db, {
+        tripId: row.tripId,
+        center: { lat: row.lat, lng: row.lng },
+        radiusMiles: row.radiusMiles,
+        serviceCategories: [],
+      });
+      return {
+        anchorId: row.id,
+        name: row.name,
+        radiusMiles: row.radiusMiles,
+        bbox: found.bbox,
+        suggestions: found.suggestions,
+      };
+    }),
 
   setPosition: op
     .input(

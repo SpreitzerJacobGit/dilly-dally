@@ -1,7 +1,8 @@
 import { and, eq, sql, type Db } from "@elements/storage-sqlite-drizzle";
 import { poiSourceRuns, type OnPois, type PoiRegion } from "@elements/intake-poi-sources";
 import { pois, trips } from "../db/schema.js";
-import { corridorRegionCells } from "./engine/pois.js";
+import { anchorRegionCells, corridorRegionCells } from "./engine/pois.js";
+import { allPendingAnchors, loadAnchorTree } from "./engine/anchors.js";
 
 /**
  * The bespoke half of POI intake: idempotent upsert on (source, sourceId) —
@@ -61,6 +62,14 @@ export const onPois: OnPois = async (db, records, _meta) => {
  */
 const MAX_REGIONS_PER_POLL = 8;
 
+/**
+ * Anchors get a reserved share of each poll. A single 110-mile anchor tiles to
+ * roughly a dozen cells, which would otherwise starve the corridor sweep for a
+ * day — and an anchor with no places behind it can only resolve geometrically,
+ * so it is the cell most worth fetching.
+ */
+const ANCHOR_REGION_QUOTA = 5;
+
 export async function vanlifeRegionProvider(db: Db): Promise<PoiRegion[]> {
   const active = await db.select().from(trips).where(eq(trips.status, "active")).limit(1);
   const trip = active[0];
@@ -86,10 +95,28 @@ export async function vanlifeRegionProvider(db: Db): Promise<PoiRegion[]> {
       .filter((r) => r.lastSuccessAt && Date.now() - Date.parse(r.lastSuccessAt) < 22 * 3_600_000)
       .map((r) => r.region),
   );
-  return cells
-    .sort((a, b) => centerDist(a) - centerDist(b) || a.key.localeCompare(b.key))
+
+  // Anchor cells share the corridor's key format, so a cell claimed by both
+  // dedupes here and shares one freshness row downstream.
+  const anchors = allPendingAnchors(await loadAnchorTree(db, trip.id));
+  const anchorCells = [
+    ...new Map(
+      anchors
+        .flatMap((a) => anchorRegionCells(a.center, a.radiusMiles))
+        .map((c) => [c.key, c] as const),
+    ).values(),
+  ]
+    .sort((a, b) => a.key.localeCompare(b.key))
     .filter((c) => !freshKeys.has(c.key))
-    .slice(0, MAX_REGIONS_PER_POLL);
+    .slice(0, ANCHOR_REGION_QUOTA);
+
+  const anchorKeys = new Set(anchorCells.map((c) => c.key));
+  const corridorCells = cells
+    .sort((a, b) => centerDist(a) - centerDist(b) || a.key.localeCompare(b.key))
+    .filter((c) => !freshKeys.has(c.key) && !anchorKeys.has(c.key))
+    .slice(0, MAX_REGIONS_PER_POLL - anchorCells.length);
+
+  return [...anchorCells, ...corridorCells];
 }
 
 /** Seeded-place count, used by the sources screen. */

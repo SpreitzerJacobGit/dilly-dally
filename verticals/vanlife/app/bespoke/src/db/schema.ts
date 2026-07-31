@@ -1,5 +1,7 @@
 // GENERATED FROM data-model.yaml — DO NOT EDIT
-// model: sha256:de99327fb0dcc5b9
+// model: sha256:de99327fb0dcc5b9 (STALE — the anchor columns on `waypoints` were
+// hand-edited in lockstep with data-model.yaml; the designer that computes this
+// hash is not in this repo. Re-run it to restore the invariant.)
 /** Bespoke tables for Dilly-Dally. Element-owned tables live in their elements. */
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "@elements/storage-sqlite-drizzle";
 import { users } from "@elements/identity-session-auth";
@@ -27,7 +29,7 @@ export const trips = sqliteTable(
   (table) => [index("trips_status").on(table.status)],
 );
 
-/** A named stop shaping the trip — family visit, custom stop, or promoted place. */
+/** A region the route must pass through — center plus radius, nestable to narrow it. Radius 0 is an exact point. */
 export const waypoints = sqliteTable(
   "waypoints",
   {
@@ -38,16 +40,28 @@ export const waypoints = sqliteTable(
     name: text("name").notNull(),
     lat: real("lat").notNull(),
     lng: real("lng").notNull(),
+    radiusMiles: real("radius_miles").notNull().default(0),
+    parentId: integer("parent_id").references((): any => waypoints.id, { onDelete: "cascade" }),
+    depth: integer("depth").notNull().default(0),
     kind: text("kind").notNull(), // family | custom | poi
     poiId: integer("poi_id")
       .references(() => pois.id, { onDelete: "set null" }),
     orderIndex: integer("order_index").notNull(),
     status: text("status").notNull().default("pending"), // pending | visited | skipped
+    // The operator's chosen pass-through point. Auto-resolution is NEVER stored:
+    // planStateFingerprint spreads this row, so a written-back resolution would
+    // change the fingerprint as a consequence of building and replan forever.
+    pinnedLat: real("pinned_lat"),
+    pinnedLng: real("pinned_lng"),
+    pinnedPoiId: integer("pinned_poi_id").references(() => pois.id, { onDelete: "set null" }),
     arriveBy: text("arrive_by"),
     notes: text("notes"),
     createdAt: text("created_at").notNull(),
   },
-  (table) => [index("waypoints_trip_order").on(table.tripId, table.orderIndex)],
+  (table) => [
+    index("waypoints_trip_order").on(table.tripId, table.orderIndex),
+    index("waypoints_trip_parent_order").on(table.tripId, table.parentId, table.orderIndex),
+  ],
 );
 
 /** An aggregated point of interest from a public source, deduped on (source, sourceId). */

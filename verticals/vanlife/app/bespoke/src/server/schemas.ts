@@ -27,6 +27,52 @@ export const waypointAddSchema = z.object({
   notes: z.string().max(500).optional(),
 });
 
+/**
+ * Anchors: a waypoint with a radius. 0 miles is an exact point — the shape a
+ * plain waypoint has always had — and anything larger is a region the route
+ * must pass through.
+ */
+export const anchorAddSchema = z.object({
+  tripId: z.number().int(),
+  name: z.string().min(1).max(120),
+  center: latLngSchema,
+  radiusMiles: z.number().min(0).max(400).default(0),
+  parentId: z.number().int().nullable().default(null),
+  kind: z.enum(["family", "custom", "poi"]).default("custom"),
+  poiId: z.number().int().optional(),
+  arriveBy: z.iso.date().optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export const anchorUpdateSchema = z.object({
+  id: z.number().int(),
+  name: z.string().min(1).max(120).optional(),
+  center: latLngSchema.optional(),
+  radiusMiles: z.number().min(0).max(400).optional(),
+  arriveBy: z.iso.date().nullable().optional(),
+  notes: z.string().max(500).nullable().optional(),
+});
+
+export const anchorPinSchema = z.object({
+  id: z.number().int(),
+  /** null clears the pin and returns the anchor to automatic resolution. */
+  point: latLngSchema.nullable(),
+  poiId: z.number().int().nullable().default(null),
+});
+
+export const anchorPromoteSchema = z.object({
+  parentId: z.number().int(),
+  poiId: z.number().int(),
+  radiusMiles: z.number().min(0).max(100).default(0),
+  name: z.string().min(1).max(120).optional(),
+});
+
+export const anchorReorderSchema = z.object({
+  tripId: z.number().int(),
+  parentId: z.number().int().nullable().default(null),
+  orderedIds: z.array(z.number().int()).max(100),
+});
+
 export const checkInSchema = z.object({
   needId: z.number().int(),
   kind: z.enum(["service", "set-level"]),

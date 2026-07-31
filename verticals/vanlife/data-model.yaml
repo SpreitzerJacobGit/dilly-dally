@@ -39,7 +39,7 @@ entities:
   - id: waypoints
     table: waypoints
     title: Waypoint
-    description: A named stop shaping the trip — family visit, custom stop, or promoted place.
+    description: A region the route must pass through — center plus radius, nestable to narrow it. Radius 0 is an exact point.
     feature: trips
     layout: { x: 360, y: 60 }
     fields:
@@ -52,6 +52,23 @@ entities:
       - { name: name, column: name, type: text, notNull: true }
       - { name: lat, column: lat, type: real, notNull: true }
       - { name: lng, column: lng, type: real, notNull: true }
+      - name: radiusMiles
+        column: radius_miles
+        type: real
+        notNull: true
+        default: 0
+        description: The disc the route must pass through; 0 means the exact point.
+      - name: parentId
+        column: parent_id
+        type: integer
+        references: { entity: waypoints, field: id, onDelete: cascade }
+        description: A narrower anchor inside a broader one; deleting the parent deletes the subtree.
+      - name: depth
+        column: depth
+        type: integer
+        notNull: true
+        default: 0
+        description: Denormalized nesting level 0-2; routing uses the leaf-most pending anchors.
       - name: kind
         column: kind
         type: text
@@ -68,11 +85,21 @@ entities:
         notNull: true
         default: pending
         enum: [pending, visited, skipped]
+      # The operator's chosen pass-through point. Auto-resolution is deliberately
+      # NEVER stored: planStateFingerprint spreads this row, so a written-back
+      # resolution would move the fingerprint as a consequence of building.
+      - { name: pinnedLat, column: pinned_lat, type: real, description: Operator's chosen pass-through point; overrides auto-resolution. }
+      - { name: pinnedLng, column: pinned_lng, type: real }
+      - name: pinnedPoiId
+        column: pinned_poi_id
+        type: integer
+        references: { entity: pois, field: id, onDelete: "set null" }
       - { name: arriveBy, column: arrive_by, type: text, semantic: iso-date }
       - { name: notes, column: notes, type: text }
       - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
     indexes:
       - { name: waypoints_trip_order, fields: [tripId, orderIndex] }
+      - { name: waypoints_trip_parent_order, fields: [tripId, parentId, orderIndex] }
   - id: pois
     table: pois
     title: Place

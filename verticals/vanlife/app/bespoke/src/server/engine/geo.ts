@@ -95,3 +95,109 @@ export function detourEstimateMinutes(prev: LatLng, p: LatLng, next: LatLng): nu
   const extra = haversineMiles(prev, p) + haversineMiles(p, next) - haversineMiles(prev, next);
   return ((extra * ROAD_FACTOR) / AVG_MPH) * 60;
 }
+
+/* ── Discs: an anchor is a region the route must pass through ─────────────── */
+
+const MILES_PER_DEG_LAT = (EARTH_RADIUS_MILES * Math.PI) / 180;
+
+/**
+ * Disc membership. Inclusive at the boundary, so a place exactly `radiusMiles`
+ * out still counts. A radius of 0 admits only the center itself.
+ */
+export function withinDisc(p: LatLng, center: LatLng, radiusMiles: number): boolean {
+  if (radiusMiles <= 0) return p.lat === center.lat && p.lng === center.lng;
+  return haversineMiles(center, p) <= radiusMiles;
+}
+
+/** Bounding box [south, west, north, east] that safely contains the disc. */
+export function discBbox(center: LatLng, radiusMiles: number): [number, number, number, number] {
+  const pad = Math.max(radiusMiles, 1);
+  const latPad = pad / 69;
+  const lngPad = pad / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180)));
+  return [center.lat - latPad, center.lng - lngPad, center.lat + latPad, center.lng + lngPad];
+}
+
+export function bearingDegrees(a: LatLng, b: LatLng): number {
+  const la = (a.lat * Math.PI) / 180;
+  const lb = (b.lat * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos(lb);
+  const x = Math.cos(la) * Math.sin(lb) - Math.sin(la) * Math.cos(lb) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/** Walk `miles` from `from` along `bearingDeg` — the inverse of bearingDegrees. */
+export function destinationPoint(from: LatLng, bearingDeg: number, miles: number): LatLng {
+  const d = miles / EARTH_RADIUS_MILES;
+  const br = (bearingDeg * Math.PI) / 180;
+  const la = (from.lat * Math.PI) / 180;
+  const lo = (from.lng * Math.PI) / 180;
+  const lat = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(br));
+  const lng =
+    lo + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(lat));
+  return { lat: (lat * 180) / Math.PI, lng: (((lng * 180) / Math.PI + 540) % 360) - 180 };
+}
+
+/**
+ * Perpendicular foot of `p` on segment a→b, clamped to the endpoints. Projected
+ * into a local equirectangular frame, which is accurate well past the scale of
+ * any single leg. `t` is the clamped position along the segment, 0 at a, 1 at b.
+ */
+export function closestPointOnSegment(
+  a: LatLng,
+  b: LatLng,
+  p: LatLng,
+): { point: LatLng; t: number; miles: number } {
+  const lat0 = ((a.lat + b.lat) / 2) * (Math.PI / 180);
+  const kx = Math.cos(lat0) * MILES_PER_DEG_LAT;
+  const ax = a.lng * kx;
+  const ay = a.lat * MILES_PER_DEG_LAT;
+  const bx = b.lng * kx;
+  const by = b.lat * MILES_PER_DEG_LAT;
+  const px = p.lng * kx;
+  const py = p.lat * MILES_PER_DEG_LAT;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  // Degenerate segment: a and b coincide, so the whole segment is that point.
+  const t = lenSq === 0 ? 0 : Math.min(1, Math.max(0, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const point = { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t };
+  return { point, t, miles: haversineMiles(point, p) };
+}
+
+/** Closest approach of a polyline to `p`. Ties keep the lowest segment index. */
+export function closestPointOnLine(
+  coords: LineCoords,
+  p: LatLng,
+): { point: LatLng; segmentIndex: number; miles: number } {
+  if (coords.length === 0) return { point: p, segmentIndex: 0, miles: 0 };
+  const first = coords[0]!;
+  if (coords.length === 1) {
+    const only = { lng: first[0], lat: first[1] };
+    return { point: only, segmentIndex: 0, miles: haversineMiles(only, p) };
+  }
+  let best = { point: { lng: first[0], lat: first[1] }, segmentIndex: 0, miles: Infinity };
+  for (let i = 1; i < coords.length; i++) {
+    const a = { lng: coords[i - 1]![0], lat: coords[i - 1]![1] };
+    const b = { lng: coords[i]![0], lat: coords[i]![1] };
+    const hit = closestPointOnSegment(a, b, p);
+    if (hit.miles < best.miles) best = { point: hit.point, segmentIndex: i - 1, miles: hit.miles };
+  }
+  return best;
+}
+
+/**
+ * Closed ring approximating the disc, in GeoJSON [lng, lat] order. Built from
+ * true geodesic offsets so it stays circular at any latitude; coordinates are
+ * rounded to 6dp so repeated builds are byte-identical.
+ */
+export function circlePolygon(center: LatLng, radiusMiles: number, steps = 64): LineCoords {
+  const r = Math.max(radiusMiles, 0);
+  const ring: LineCoords = [];
+  for (let i = 0; i < steps; i++) {
+    const p = destinationPoint(center, (360 * i) / steps, r);
+    ring.push([Math.round(p.lng * 1e6) / 1e6, Math.round(p.lat * 1e6) / 1e6]);
+  }
+  ring.push(ring[0]!);
+  return ring;
+}

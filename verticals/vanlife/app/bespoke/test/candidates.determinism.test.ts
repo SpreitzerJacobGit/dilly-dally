@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createDb, type DbHandle } from "@elements/storage-sqlite-drizzle";
+import { createDb, eq, type DbHandle } from "@elements/storage-sqlite-drizzle";
 import { users } from "@elements/identity-session-auth";
 import type { PoiRecord } from "@elements/intake-poi-sources";
 import {
@@ -15,13 +15,19 @@ import {
   pois,
   progressEvents,
   trips,
+  waypoints,
 } from "../src/db/schema.js";
 import {
   buildDailyCandidates,
   planStateFingerprint,
   type TripRow,
 } from "../src/server/engine/candidates.js";
-import { haversineMiles, type LatLng } from "../src/server/engine/geo.js";
+import { closestPointOnLine, haversineMiles, type LatLng } from "../src/server/engine/geo.js";
+import {
+  flattenPendingAnchors,
+  loadAnchorTree,
+  resolveAnchor,
+} from "../src/server/engine/anchors.js";
 import { onPois } from "../src/server/poiHook.js";
 
 /**
@@ -286,5 +292,108 @@ describe("ROUTE-5: replan determinism", () => {
     await new Promise((r) => setTimeout(r, 5));
     await onPois(handle.db, [{ ...records[0]!, name: "Corridor Spring (renamed)" }], meta);
     expect(await planStateFingerprint(handle.db, tripId)).not.toBe(f1);
+  });
+});
+
+describe("area anchors", () => {
+  /** A broad disc straddling the corridor, roughly a third of the way along. */
+  const CENTER = lerp(0.33);
+  let anchorId: number;
+
+  beforeAll(async () => {
+    anchorId = (
+      await handle.db
+        .insert(waypoints)
+        .values({
+          tripId,
+          name: "Test Range",
+          lat: CENTER.lat,
+          lng: CENTER.lng,
+          radiusMiles: 60,
+          parentId: null,
+          depth: 0,
+          kind: "custom",
+          orderIndex: 0,
+          status: "pending",
+          createdAt: T0,
+        })
+        .returning({ id: waypoints.id })
+    )[0]!.id;
+  });
+
+  it("still generates identical candidates twice with an anchor in play", async () => {
+    const run1 = await buildDailyCandidates(handle.db, trip, NOW);
+    const run2 = await buildDailyCandidates(handle.db, trip, NOW);
+    expect(run1.length).toBeGreaterThan(0);
+    expect(run2).toEqual(run1);
+  });
+
+  it("routes the projected continuation through the anchor's area", async () => {
+    // The end-to-end proof of the whole feature: whatever else a candidate
+    // does, the route it projects must actually enter the region.
+    const [candidate] = await buildDailyCandidates(handle.db, trip, NOW);
+    expect(candidate).toBeDefined();
+    const line = JSON.parse(candidate!.geometry) as { coordinates: [number, number][] };
+    const projected = candidate!.projectedGeometry
+      ? (JSON.parse(candidate!.projectedGeometry) as { coordinates: [number, number][] }).coordinates
+      : [];
+    const all = [...line.coordinates, ...projected];
+    expect(closestPointOnLine(all, CENTER).miles).toBeLessThanOrEqual(60);
+  });
+
+  it("moving the fingerprint: radius, parent, order and pin each count as a change", async () => {
+    const base = await planStateFingerprint(handle.db, tripId);
+
+    await handle.db.update(waypoints).set({ radiusMiles: 75 }).where(eq(waypoints.id, anchorId));
+    const afterRadius = await planStateFingerprint(handle.db, tripId);
+    expect(afterRadius).not.toBe(base);
+
+    await handle.db.update(waypoints).set({ orderIndex: 3 }).where(eq(waypoints.id, anchorId));
+    expect(await planStateFingerprint(handle.db, tripId)).not.toBe(afterRadius);
+
+    await handle.db
+      .update(waypoints)
+      .set({ orderIndex: 0, pinnedLat: CENTER.lat, pinnedLng: CENTER.lng })
+      .where(eq(waypoints.id, anchorId));
+    expect(await planStateFingerprint(handle.db, tripId)).not.toBe(afterRadius);
+
+    // Back to where we started: the hash is a pure function of state, not of
+    // how many times it has been edited.
+    await handle.db
+      .update(waypoints)
+      .set({ radiusMiles: 60, orderIndex: 0, pinnedLat: null, pinnedLng: null })
+      .where(eq(waypoints.id, anchorId));
+    expect(await planStateFingerprint(handle.db, tripId)).toBe(base);
+  });
+
+  it("a plain waypoint written with only pre-anchor columns still resolves to its exact point", async () => {
+    // Backward compatibility: rows that predate the anchor columns rely on the
+    // radius-0 default and must route exactly as they always did.
+    const legacyPoint = lerp(0.7);
+    const id = (
+      await handle.db
+        .insert(waypoints)
+        .values({
+          tripId,
+          name: "Legacy Pin",
+          lat: legacyPoint.lat,
+          lng: legacyPoint.lng,
+          kind: "custom",
+          orderIndex: 9,
+          status: "pending",
+          createdAt: T0,
+        })
+        .returning({ id: waypoints.id })
+    )[0]!.id;
+
+    const tree = await loadAnchorTree(handle.db, tripId);
+    const legacy = flattenPendingAnchors(tree).find((a) => a.id === id);
+    expect(legacy?.radiusMiles).toBe(0);
+    expect(legacy?.depth).toBe(0);
+    const resolved = resolveAnchor(legacy!, ORIGIN, DEST, []);
+    expect(resolved.via).toBe("point");
+    expect(resolved.point).toEqual(legacyPoint);
+
+    await handle.db.delete(waypoints).where(eq(waypoints.id, id));
   });
 });

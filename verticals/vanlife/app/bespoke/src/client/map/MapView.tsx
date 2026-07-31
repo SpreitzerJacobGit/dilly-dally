@@ -9,7 +9,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle, registerPmtilesProtocol } from "@elements/shell-map-view/client";
 import { CATEGORY_COLORS, PROJECTED_COLOR, ROLE_COLORS } from "./palette.js";
-import type { CandidateRouteView, MapViewProps } from "./types.js";
+import type { CandidateRouteView, MapAnchorView, MapViewProps } from "./types.js";
 
 /**
  * Imperative MapLibre wrapped in a presentation-only component: props in,
@@ -61,6 +61,40 @@ function poisToGeojson(pois: MapViewProps["pois"]) {
   };
 }
 
+function anchorsToGeojson(anchors: MapAnchorView[], draft: MapAnchorView | null) {
+  const all = [...anchors, ...(draft ? [draft] : [])];
+  return {
+    type: "FeatureCollection" as const,
+    features: all
+      .filter((a) => a.ring && a.ring.length > 3)
+      .map((a) => ({
+        type: "Feature" as const,
+        properties: {
+          id: a.id,
+          name: a.name,
+          depth: a.depth,
+          selected: a.selected,
+          draft: draft !== null && a.id === draft.id,
+          dimmed: a.state !== "pending",
+        },
+        geometry: { type: "Polygon" as const, coordinates: [a.ring!] },
+      })),
+  };
+}
+
+/** Depth reads as nesting: the broad parent recedes, the narrow child asserts. */
+const anchorColorExpr = [
+  "match",
+  ["get", "depth"],
+  0,
+  "#0f766e",
+  1,
+  "#0891b2",
+  2,
+  "#6366f1",
+  "#0f766e",
+] as unknown as string;
+
 const tierColorExpr = [
   "match",
   ["get", "tier"],
@@ -97,9 +131,39 @@ export function MapView(props: MapViewProps): JSX.Element {
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
 
     map.on("load", () => {
+      map.addSource("anchors", { type: "geojson", data: anchorsToGeojson([], null) });
       map.addSource("projected", { type: "geojson", data: projectedToGeojson([]) });
       map.addSource("routes", { type: "geojson", data: routesToGeojson([], null) });
       map.addSource("pois", { type: "geojson", data: poisToGeojson([]) });
+
+      // Anchors first, so every route line draws on top of the regions.
+      map.addLayer({
+        id: "anchors-fill",
+        type: "fill",
+        source: "anchors",
+        paint: {
+          "fill-color": anchorColorExpr,
+          "fill-opacity": [
+            "case",
+            ["get", "dimmed"],
+            0.04,
+            ["get", "selected"],
+            0.18,
+            0.1,
+          ] as unknown as number,
+        },
+      });
+      map.addLayer({
+        id: "anchors-outline",
+        type: "line",
+        source: "anchors",
+        paint: {
+          "line-color": anchorColorExpr,
+          "line-width": ["case", ["get", "selected"], 2.5, 1.5] as unknown as number,
+          "line-opacity": ["case", ["get", "dimmed"], 0.3, 0.9] as unknown as number,
+          "line-dasharray": ["case", ["get", "draft"], ["literal", [2, 2]], ["literal", [1, 0]]] as unknown as number[],
+        },
+      });
 
       map.addLayer({
         id: "projected-lines",
@@ -156,6 +220,19 @@ export function MapView(props: MapViewProps): JSX.Element {
         if (id !== undefined) propsRef.current.onPoiClick(id);
         e.preventDefault();
       });
+      map.on("click", "anchors-fill", (e: MapLayerMouseEvent) => {
+        // Routes and places sit on top and claim the click first; only an
+        // otherwise-empty part of a region selects the region.
+        if (e.defaultPrevented) return;
+        const id = e.features?.[0]?.properties?.id as number | undefined;
+        if (id !== undefined) propsRef.current.onAnchorClick?.(id);
+        e.preventDefault();
+      });
+      map.on("click", (e: MapLayerMouseEvent) => {
+        if (e.defaultPrevented) return;
+        propsRef.current.onMapClick?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      });
+
       map.on("mouseenter", "routes-hit", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "routes-hit", () => (map.getCanvas().style.cursor = ""));
 
@@ -190,6 +267,14 @@ export function MapView(props: MapViewProps): JSX.Element {
     );
     (map.getSource("projected") as GeoJSONSource | undefined)?.setData(projectedToGeojson(props.routes));
   }, [props.routes, props.highlightedId, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("anchors") as GeoJSONSource | undefined)?.setData(
+      anchorsToGeojson(props.anchors ?? [], props.draftAnchor ?? null),
+    );
+  }, [props.anchors, props.draftAnchor, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
