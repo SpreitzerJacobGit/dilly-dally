@@ -2,12 +2,18 @@
 
 A trip planner for two people living and working out of a van.
 
-Give it an anchor destination and it proposes three to five candidate routes each morning —
+Give it an Origin and a final Target and it proposes three to five candidate routes each morning —
 from "most direct" down to side-quest-tier detours — every one of them inside a deviation
 budget of twice the straight-shot duration. It tracks the recurring needs of van life (food,
 gas, water, laundry, trash, waste-water, electric hookup) as estimated levels that drain with
 time and miles, and weaves the stops that service them into the day's routes before anything
 runs dry or overflows.
+
+A trip is an **Origin** and an ordered list of **Targets**: the last one is where you end up,
+and the ones before it are the regions and places the route has to pass through. One screen
+holds the map, that list, today's candidates and the trip's numbers; Needs, Settings and
+Status are their own pages. Several trips can be planned side by side — the one being
+looked at and the one the van is actually on are deliberately different things.
 
 It plans. It never navigates turn-by-turn — a chosen leg hands off to Google Maps.
 
