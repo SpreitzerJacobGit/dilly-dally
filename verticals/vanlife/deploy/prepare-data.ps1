@@ -2,7 +2,11 @@
 #
 # Fills the two EXTERNAL volumes the compose stack expects:
 #   vanlife-osrm  — routing graph:  us-west-latest.osm.pbf -> osrm-extract/partition/customize (MLD)
-#   vanlife-tiles — basemap.pmtiles + glyphs/ + sprites/ + manifest.webmanifest
+#   vanlife-tiles — basemap.pmtiles + glyphs/ + sprites/
+#
+# The PWA manifest and icons are NOT here — they ship inside the image from the
+# web app's public/ directory, so they survive volume resets and stay versioned
+# with the build.
 #
 # Inputs (downloaded beforehand into -SourceDir):
 #   us-west-latest.osm.pbf   https://download.geofabrik.de/north-america/us-west-latest.osm.pbf
@@ -33,8 +37,7 @@ docker run --rm -v vanlife-tiles:/tiles -v "${SourceDir}:/host:ro" alpine sh -c 
 cp /host/basemap.pmtiles /tiles/ &&
 mkdir -p /tiles/glyphs /tiles/sprites &&
 cp -r /host/basemaps-assets/fonts/. /tiles/glyphs/ &&
-cp -r /host/basemaps-assets/sprites/. /tiles/sprites/ &&
-if [ -f /host/manifest.webmanifest ]; then cp /host/manifest.webmanifest /tiles/; fi
+cp -r /host/basemaps-assets/sprites/. /tiles/sprites/
 '@
 
 Write-Host "Done. Volumes ready: vanlife-osrm, vanlife-tiles"

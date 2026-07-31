@@ -20,7 +20,9 @@ which must wipe the database volume but never the multi-gigabyte map data.
    - `basemap.pmtiles` — `pmtiles extract https://build.protomaps.com/<yyyymmdd>.pmtiles basemap.pmtiles --bbox=-125.5,31.0,-102.0,49.5`
      (pmtiles CLI: https://github.com/protomaps/go-pmtiles/releases)
    - `basemaps-assets/` — `git clone --depth 1 https://github.com/protomaps/basemaps-assets`
-   - optionally `manifest.webmanifest` (PWA manifest served from the tiles volume)
+
+   The PWA manifest and icons are not provisioned here — they live in
+   `app/web/public/` and ship inside the image.
 2. `powershell verticals/vanlife/deploy/prepare-data.ps1 -SourceDir <scratch dir>`
    - OSRM preprocessing (MLD) needs roughly 10+ GB of Docker memory for us-west.
    - Refreshing the map later = re-download + re-run; the app keeps running meanwhile.
