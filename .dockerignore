@@ -1,0 +1,15 @@
+# Authored (not generated) — the build context is the repository root, so without this
+# every `docker compose build` ships the local data scratch (multi-GB) and node_modules to
+# the daemon. The Dockerfile runs its own `pnpm install`, so none of this is needed inside.
+node_modules/
+**/node_modules/
+.git/
+.data-src/
+.tiles/
+.claude/
+dist/
+**/dist/
+*.tsbuildinfo
+verticals/*/db/*.db*
+.env
+.env.*

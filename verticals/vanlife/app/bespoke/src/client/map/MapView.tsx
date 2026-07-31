@@ -7,7 +7,7 @@ import {
   type MapLayerMouseEvent,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { basemapStyle, registerPmtilesProtocol } from "@elements/shell-map-view/client";
+import { basemapStyle, initMapLibre } from "@elements/shell-map-view/client";
 import { CATEGORY_COLORS, PROJECTED_COLOR, ROLE_COLORS } from "./palette.js";
 import type { CandidateRouteView, MapAnchorView, MapViewProps } from "./types.js";
 
@@ -17,7 +17,7 @@ import type { CandidateRouteView, MapAnchorView, MapViewProps } from "./types.js
  * PMTiles archive — every URL in the style resolves to the van server.
  */
 
-registerPmtilesProtocol();
+initMapLibre();
 
 const PMTILES_URL = "/tiles/basemap.pmtiles";
 const ASSETS_URL = "/tiles";
@@ -114,6 +114,7 @@ export function MapView(props: MapViewProps): JSX.Element {
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Marker[]>([]);
   const [ready, setReady] = useState(false);
+  const [basemapError, setBasemapError] = useState<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -129,6 +130,17 @@ export function MapView(props: MapViewProps): JSX.Element {
     });
     mapRef.current = map;
     map.addControl(new NavigationControl({ showCompass: false }), "top-right");
+
+    // MapLibre reports every style, source, sprite, glyph and tile failure
+    // through this event and nowhere else. Without it a broken basemap renders
+    // as a silent grey rectangle — exactly the kind of quiet degradation this
+    // app is meant not to do.
+    map.on("error", (e: { error?: Error }) => {
+      const message = e.error?.message ?? "unknown map error";
+      // eslint-disable-next-line no-console
+      console.error("basemap error:", message);
+      setBasemapError((prev) => prev ?? message);
+    });
 
     map.on("load", () => {
       map.addSource("anchors", { type: "geojson", data: anchorsToGeojson([], null) });
@@ -333,5 +345,18 @@ export function MapView(props: MapViewProps): JSX.Element {
     map.fitBounds([[west, south], [east, north]], { padding: 48, duration: 500 });
   }, [props.fitKey, props.routes, props.position, ready]);
 
-  return <div ref={containerRef} style={{ width: "100%", height: props.heightStyle }} />;
+  return (
+    <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>
+      <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+      {basemapError && (
+        <div className="vl-basemap-error" role="status">
+          <strong>Basemap unavailable</strong>
+          <span>{basemapError}</span>
+          <span className="vl-basemap-error-hint">
+            Routes and stops below are unaffected. Check the tile archive on the van server.
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }

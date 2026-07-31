@@ -7,7 +7,7 @@ version: 0.1.0
 variationGroup: null
 variationAxis: null
 summary: Offline-first map plumbing — serves a PMTiles basemap with range requests plus self-hosted glyphs/sprites, and builds a MapLibre style whose every URL resolves locally.
-provides: [createTileAssetsPlugin, TileAssetsOptions, registerPmtilesProtocol, basemapStyle, BasemapStyleOptions]
+provides: [createTileAssetsPlugin, TileAssetsOptions, initMapLibre, basemapStyle, BasemapStyleOptions]
 requiresElements: [lifecycle/service-runtime]
 requiresConfig: [TILES_DIR]
 claims:
@@ -31,7 +31,7 @@ The server half mounts a static route (default `/tiles`) over the configured dir
 
 ## Wiring
 
-The generator emits the plugin into the service-runtime `plugins` list when this element is pinned, with `TILES_DIR` in the config schema. The vertical's map component calls `registerPmtilesProtocol()` once, then `basemapStyle({...})` for the style, and layers its own sources on top.
+The generator emits the plugin into the service-runtime `plugins` list when this element is pinned, with `TILES_DIR` in the config schema. The vertical's map component calls `initMapLibre()` once — which points MapLibre at the bundled worker and registers the pmtiles protocol — then `basemapStyle({...})` for the style, and layers its own sources on top.
 
 ## Variations & alternatives
 
