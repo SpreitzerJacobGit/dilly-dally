@@ -12,6 +12,8 @@
 
 const VIEWED_TRIP = "vl.viewedTripId";
 const DIGEST_DISMISSED = (userKey: string): string => `vl.digestDismissed.${userKey}`;
+/** Check-ins recorded with no uplink, waiting to be replayed. */
+export const CHECKIN_QUEUE_KEY = "vl.checkinQueue";
 
 function read(key: string): string | null {
   try {

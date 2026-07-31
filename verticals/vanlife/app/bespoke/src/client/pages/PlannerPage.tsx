@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { trpc } from "../trpc.js";
 import type { PageUser } from "../index.js";
 import { FINAL_TARGET_ID, type CandidateRouteView, type MapPoiView, type MapTargetView } from "../map/types.js";
@@ -236,14 +236,23 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     setTab(picker.activeTripId === tripId ? "today" : "targets");
   }, [tab, picker.isLoading, picker.activeTripId, tripId]);
 
-  // A new trip is a new everything: drop the selection and frame the whole trip.
+  // A new trip is a new everything.
   useEffect(() => {
     setSelectedId(null);
     setHighlightedId(null);
     setSelectionStale(false);
-    setFitTo(null);
-    setFitKey(`trip-${String(tripId ?? 0)}`);
   }, [tripId]);
+
+  // Frame the trip once its Targets have actually arrived. Fitting on the trip
+  // id alone runs against an empty map and then never re-runs, which leaves the
+  // final Target sitting off the edge of the view.
+  const framedTripRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (tripId === null || tripQ.data === undefined || framedTripRef.current === tripId) return;
+    framedTripRef.current = tripId;
+    setFitTo(null);
+    setFitKey(`trip-${String(tripId)}-loaded`);
+  }, [tripId, tripQ.data]);
 
   useEffect(() => {
     if (picker.recovered) {
