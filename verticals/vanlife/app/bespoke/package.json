@@ -1,0 +1,45 @@
+{
+  "name": "@vanlife/bespoke",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./src/server/index.ts",
+    "./client": "./src/client/index.tsx",
+    "./db": "./src/db/schema.ts",
+    "./fixtures": "./src/seed/fixtures.ts"
+  },
+  "dependencies": {
+    "@elements/identity-session-auth": "workspace:*",
+    "@elements/intake-form-intake": "workspace:*",
+    "@elements/intake-poi-sources": "workspace:*",
+    "@elements/lifecycle-app-settings": "workspace:*",
+    "@elements/lifecycle-interval-jobs": "workspace:*",
+    "@elements/lifecycle-migrate-seed": "workspace:*",
+    "@elements/lifecycle-service-runtime": "workspace:*",
+    "@elements/observability-structured-logging": "workspace:*",
+    "@elements/output-dashboard-cards": "workspace:*",
+    "@elements/output-ntfy-push": "workspace:*",
+    "@elements/output-table-views": "workspace:*",
+    "@elements/processing-threshold-rules": "workspace:*",
+    "@elements/shell-app-shell": "workspace:*",
+    "@elements/shell-crud-tables": "workspace:*",
+    "@elements/shell-map-view": "workspace:*",
+    "@elements/shell-schema-forms": "workspace:*",
+    "@elements/storage-sqlite-drizzle": "workspace:*",
+    "@tanstack/react-query": "catalog:",
+    "@trpc/react-query": "catalog:",
+    "lucide-react": "catalog:",
+    "maplibre-gl": "catalog:",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-router-dom": "*"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-router-dom": "catalog:"
+  }
+}

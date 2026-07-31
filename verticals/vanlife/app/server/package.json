@@ -1,0 +1,40 @@
+{
+  "name": "@vanlife/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts",
+    "./router": "./src/router.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/main.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@elements/lifecycle-app-config": "workspace:*",
+    "@elements/lifecycle-service-runtime": "workspace:0.2.0",
+    "@elements/lifecycle-migrate-seed": "workspace:*",
+    "@elements/observability-structured-logging": "workspace:*",
+    "@elements/observability-health": "workspace:0.2.0",
+    "@elements/storage-sqlite-drizzle": "workspace:0.1.0",
+    "@elements/identity-session-auth": "workspace:0.1.0",
+    "@elements/shell-map-view": "workspace:0.1.0",
+    "@elements/intake-form-intake": "workspace:0.1.0",
+    "@elements/intake-poi-sources": "workspace:0.1.0",
+    "@elements/processing-threshold-rules": "workspace:0.1.0",
+    "@elements/output-table-views": "workspace:0.1.0",
+    "@elements/output-ntfy-push": "workspace:0.1.0",
+    "@elements/lifecycle-interval-jobs": "workspace:0.2.0",
+    "@elements/lifecycle-app-settings": "workspace:0.1.0",
+    "@vanlife/bespoke": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "catalog:",
+    "tsup": "catalog:",
+    "tsx": "catalog:"
+  }
+}

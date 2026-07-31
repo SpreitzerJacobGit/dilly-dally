@@ -1,0 +1,18 @@
+{
+  "name": "@elements/intake-poi-sources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@elements/identity-session-auth": "workspace:*",
+    "@elements/lifecycle-app-settings": "workspace:*",
+    "@elements/lifecycle-interval-jobs": "workspace:*",
+    "@elements/lifecycle-service-runtime": "workspace:*",
+    "@elements/observability-structured-logging": "workspace:*",
+    "@elements/storage-sqlite-drizzle": "workspace:*",
+    "zod": "catalog:"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@elements/identity-session-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts"
+  },
+  "dependencies": {
+    "@elements/lifecycle-service-runtime": "workspace:*",
+    "@elements/storage-sqlite-drizzle": "workspace:*",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "*"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "react": "catalog:"
+  }
+}

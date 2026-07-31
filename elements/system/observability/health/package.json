@@ -1,0 +1,13 @@
+{
+  "name": "@elements/observability-health",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@elements/observability-structured-logging": "workspace:*",
+    "fastify": "catalog:"
+  }
+}

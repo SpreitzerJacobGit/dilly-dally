@@ -1,0 +1,18 @@
+{
+  "name": "dilly-dally",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "build": "pnpm --filter @vanlife/web build && pnpm --filter @vanlife/server build",
+    "dev:server": "pnpm --filter @vanlife/server dev",
+    "dev:web": "pnpm --filter @vanlife/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

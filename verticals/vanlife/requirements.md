@@ -1,0 +1,94 @@
+# Dilly-Dally Van-Life Planner — Requirements
+
+Behavioral requirements only. No component names, no versions, no architecture.
+
+## Summary
+
+Dilly-Dally is the planning layer for a couple living and working from a van. Given an anchor destination (say, Las Vegas), it proposes a handful of candidate routes each day — from "most direct" down to side-quest-tier detours — all inside a deviation budget of twice the straight-shot duration. It tracks the recurring needs of van life (food, gas, water, laundry, trash, waste-water, electric hookup) as estimated levels that drain with time and miles, and it weaves the stops that satisfy them into the day's routes before anything runs dry or overflows. Both operators are equals: either can check in a chore, pick a route, or reshape the plan. A morning digest summarizes progress and looming deadlines. The application plans; it never navigates turn-by-turn.
+
+## Trips & waypoints {#trips}
+
+A trip runs from an origin to an anchor destination. Waypoints — family visits, must-sees, promoted places — shape every plan.
+
+`[TRIP-1]` Creating a trip with an origin and an anchor destination computes and shows the direct drive duration, and the deviation budget shown everywhere equals exactly twice that duration.
+`[TRIP-2]` Waypoints can be added to a trip, reordered, and marked visited or skipped; a visited or skipped waypoint no longer appears as a stop in newly generated candidates.
+`[TRIP-3]` Exactly one trip is active at a time; the dashboard, candidates, needs outlook, and digest all reflect the active trip, and completing a trip archives it with its history intact.
+`[TRIP-4]` The trip screen shows progress toward the anchor and how much of the deviation budget has been spent, and these figures change only as driving is recorded — never by the mere passage of time.
+`[TRIP-5]` An operator can set the current position manually ("we are here"); plans generated afterwards start from that position.
+
+## Recurring needs & levels {#needs}
+
+Every recurring need is tracked as an estimated level with a capacity, a consumption rate, and a threshold. Estimates are honest about being estimates.
+
+`[NEED-1]` The needs screen lists every tracked need with its unit, capacity, current estimated level, consumption rate, and projected time until it runs dry or overflows.
+`[NEED-2]` A need's displayed level is always labeled as an estimate with the time it was computed from, and is derived from the last check-in, the configured rate, and elapsed time and recorded miles — the application never presents it as a measured value.
+`[NEED-3]` A need projected to run dry or overflow before its next planned service stop is flagged as urgent everywhere it appears.
+`[NEED-4]` Editing a need's capacity, rate, or threshold immediately changes every projection; the application may suggest a refined rate derived from check-in history, and a suggestion never applies itself — an operator must accept it.
+`[NEED-5]` Work internet appears as a tracked concern on the needs screen but never generates route stops — it is a checklist item, not a routing driver.
+
+## Check-ins {#checkins}
+
+Levels change only through check-ins. One tap records the common case; a quantity refines it.
+
+`[CHK-1]` A one-tap check-in ("dumped tanks", "filled water", "grocery run done") records the event as a full reset of that need; an optional quantity records a partial fill or dump instead.
+`[CHK-2]` No control anywhere edits a level number directly — levels change only through check-ins (including an explicit "set level" correction check-in), and a mistake is corrected by recording another check-in.
+`[CHK-3]` Every check-in records who recorded it and when, and appears in that need's history newest first.
+`[CHK-4]` Recording a check-in immediately updates the need's level, its projected deadline, and any urgency flags derived from them.
+
+## POI aggregation {#poi}
+
+Candidate stops come from public sources into a local store, honestly attributed and honestly bookkept.
+
+`[POI-1]` A sources screen lists every place source in exactly one honest state — "Not configured", "Never checked", "Healthy", or "Erroring" with the error visible — and shows last-checked and last-succeeded times as "never" until a fetch has actually happened.
+`[POI-2]` A place fetched twice — by re-checking, restarting, or overlapping regions — appears in the application once, never duplicated.
+`[POI-3]` Every place shows which source it came from, and where the source has its own page for the place, a link out to it; the application never rehosts another service's content.
+`[POI-4]` An operator can pin or reject any suggested place for the active trip: a rejected place never reappears in suggestions for that trip, and a pinned place is included in generated plans whenever it is feasible within the budget.
+`[POI-5]` Source API keys are entered through the application and take effect without a restart; a source whose key is missing reports "Not configured" while every other source keeps working.
+
+## Route candidates {#routes}
+
+Each day the application proposes candidate routes across a spectrum of ambition, every one honest about the budget and the needs it does or does not cover.
+
+`[ROUTE-1]` Each day the dashboard offers three to five candidate routes spanning a spectrum from most-direct to side-quest tier, and every candidate keeps the total remaining trip duration within the deviation budget.
+`[ROUTE-2]` Every candidate weaves in service stops so that no tracked need is projected to run dry or overflow along it; each stop is annotated with the needs it services, and when no reachable place can satisfy a need in time, the candidate says so with an urgent flag rather than hiding the gap.
+`[ROUTE-3]` Selecting a candidate records it as the day's plan; the day's other candidates remain viewable as history and are never silently deleted.
+`[ROUTE-4]` A chosen leg can be handed off to Google Maps as a link that opens the leg's stops in order; the application itself never navigates turn-by-turn.
+`[ROUTE-5]` Regenerating the day's candidates without any new check-in, selection, or position change returns the same candidates — plans do not reshuffle on their own.
+`[ROUTE-6]` Marking a stop of the selected route as visited records progress; candidates generated afterwards start from the recorded position.
+`[ROUTE-7]` When route computation is unavailable, the dashboard still shows the last generated plan clearly marked as stale, with a visible message — never a blank screen or a silent failure.
+
+## Map dashboard {#map}
+
+The map is the primary surface: candidates in role-coded colors, their futures in gray, details in a synced list.
+
+`[MAP-1]` Today's candidates render on the map in role-coded colors with a legend, each with its projected continuation to the anchor drawn in gray behind it, so zooming out shows the alternative futures spread and reconverge on the destination.
+`[MAP-2]` Below or beside the map, a detail list describes each candidate — role, drive time, deviation, stops, and highlights — and selecting a candidate in either the list or the map highlights it in both.
+`[MAP-3]` The map's base imagery is served by the application's own server, so the map renders when the only reachable host is the van server.
+`[MAP-4]` Tapping a stop or place on the map or in a list shows its details, including its source attribution and any link out.
+
+## Interest profile {#interests}
+
+Side-quest suggestions are biased by configurable interest weights blended with popularity.
+
+`[PROF-1]` Category interest weights are editable and arrive seeded with defaults; changing a weight re-ranks side-quest suggestions the next time candidates are generated.
+`[PROF-2]` A category whose weight is set to zero produces no side-quest suggestions, no matter how popular its places are; among the rest, a heavily weighted category outranks a lightly weighted one of similar popularity.
+
+## Daily digest {#digest}
+
+One digest each morning: progress, today's options, and what needs attention — with an important-only cut that is honest when nothing is important.
+
+`[DIG-1]` Each morning at the configured hour the application publishes exactly one digest for the day — never more than one, even across restarts — summarizing trip progress, today's candidates, and need deadlines within the next two days.
+`[DIG-2]` The digest has a full summary and an important-only cut; when nothing is urgent, the important-only cut says so plainly instead of inventing urgency.
+`[DIG-3]` The morning digest is always readable on the dashboard as a dismissible banner, and dismissing it on one device does not dismiss it for the other operator.
+`[DIG-4]` Push delivery reports itself honestly: an unconfigured push channel shows "Not configured" while the in-app digest keeps working, and a failed delivery is visible with its error — the application never claims a digest was pushed that was not.
+
+## Offline & remote {#offline}
+
+The van server is the source of truth; the internet is optional.
+
+`[OFF-1]` With no internet connection, the dashboard still shows the current plan, need levels, and map, and plans can still be regenerated — only place refreshing and push delivery degrade, each reporting its state honestly.
+`[OFF-2]` The map never fetches base imagery from a third-party service at runtime — an installation with no internet renders the same map as one with it.
+
+## First-run experience
+
+The application arrives with a realistic seeded trip — Portland, OR to Las Vegas, NV, routed through California via a Bishop, CA waypoint — two operator accounts, all seven needs configured with plausible capacities, rates, and part-consumed levels, a short check-in history, and a set of seeded places along the corridor. A first-time visitor can sign in and immediately see candidates on the map, a meaningful needs outlook, and a digest preview. Exact seeded contents are specified alongside the seed data itself.

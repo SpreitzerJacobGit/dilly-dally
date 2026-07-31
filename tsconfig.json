@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "elements/**/src/**/*",
+    "elements/**/test/**/*",
+    "verticals/*/app/*/src/**/*",
+    "verticals/*/seed.fixtures.ts"
+  ],
+  "exclude": ["**/node_modules", "**/dist"]
+}

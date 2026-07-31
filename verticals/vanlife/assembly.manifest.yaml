@@ -1,0 +1,148 @@
+# Assembly manifest — the ONLY place component versions live.
+# The QA agent never sees this file.
+manifestVersion: 1
+
+vertical:
+  id: vanlife
+  name: Dilly-Dally
+  client: Jacob Spreitzer
+  semver: 0.1.0
+
+requirements:
+  path: ./requirements.md
+
+# Designed in the model designer (`pnpm model verticals/vanlife`) — the last
+# step of planning. app/bespoke/src/db/schema.ts is generated from this.
+dataModel:
+  path: ./data-model.yaml
+
+elements:
+  - ref: storage
+    element: storage/sqlite-drizzle
+    version: 0.1.0
+    config: {}
+  - ref: identity
+    element: identity/session-auth
+    variation: password
+    version: 0.1.0
+    config:
+      # Two co-equal operators — one role, no per-user access control.
+      roles: [operator]
+      adminRole: operator
+      # It's a van: month-long sessions beat re-logins on the road.
+      sessionTtlHours: 720
+  - ref: shell
+    element: shell/app-shell
+    version: 0.1.0
+    config:
+      appName: Dilly-Dally
+  - ref: forms
+    element: shell/schema-forms
+    version: 0.1.0
+    config: {}
+  - ref: tables
+    element: shell/crud-tables
+    version: 0.1.0
+    config: {}
+  - ref: map
+    element: shell/map-view
+    version: 0.1.0
+    config: {}
+  - ref: intake
+    element: intake/form-intake
+    version: 0.1.0
+    config: {}
+  - ref: poi
+    element: intake/poi-sources
+    version: 0.1.0
+    config: {}
+  - ref: thresholds
+    element: processing/threshold-rules
+    version: 0.1.0
+    config: {}
+  - ref: listing
+    element: output/table-views
+    version: 0.1.0
+    config: {}
+  - ref: dashboard
+    element: output/dashboard-cards
+    version: 0.1.0
+    config: {}
+  - ref: notify
+    element: output/ntfy-push
+    version: 0.1.0
+    config: {}
+  - ref: lifecycle
+    element: lifecycle/service-runtime
+    version: 0.2.0
+    config: {}
+  - ref: delivery
+    element: lifecycle/docker-delivery
+    version: 0.2.0
+    config: {}
+  - ref: obs
+    element: observability/health
+    version: 0.2.0
+    config: {}
+  - ref: jobs
+    element: lifecycle/interval-jobs
+    version: 0.2.0
+    config: {}
+  - ref: settings
+    element: lifecycle/app-settings
+    version: 0.1.0
+    config: {}
+
+wiring:
+  - { from: bespoke/trips, to: identity, surface: authz.protectedProcedure }
+  - { from: bespoke/trips, to: storage, surface: storage.db }
+  - { from: bespoke/needs, to: thresholds, surface: thresholds.evaluate }
+  - { from: bespoke/needs, to: dashboard, surface: output.statCard }
+  - { from: bespoke/checkins, to: identity, surface: authz.protectedProcedure }
+  - { from: bespoke/checkins, to: intake, surface: intake.write }
+  - { from: bespoke/poi, to: poi, surface: poi.onPois }
+  - { from: poi, to: jobs, surface: jobs.status }
+  - { from: poi, to: settings, surface: settings.store }
+  - { from: bespoke/routes, to: storage, surface: storage.db }
+  - { from: bespoke/map-dashboard, to: map, surface: map.basemapStyle }
+  - { from: bespoke/digest, to: notify, surface: notify.publishOnce }
+  - { from: bespoke/digest, to: jobs, surface: jobs.status }
+  - { from: notify, to: settings, surface: settings.store }
+
+bespoke:
+  features:
+    - { id: trips, title: Trips & waypoints, requirementsSection: "#trips" }
+    - { id: needs, title: Recurring needs & levels, requirementsSection: "#needs" }
+    - { id: checkins, title: Check-ins, requirementsSection: "#checkins" }
+    - { id: poi, title: POI aggregation, requirementsSection: "#poi" }
+    - { id: routes, title: Route candidates, requirementsSection: "#routes" }
+    - { id: map-dashboard, title: Map dashboard, requirementsSection: "#map" }
+    - { id: interests, title: Interest profile, requirementsSection: "#interests" }
+    - { id: digest, title: Daily digest, requirementsSection: "#digest" }
+    - { id: offline, title: Offline & remote, requirementsSection: "#offline" }
+
+seed:
+  fixturesPath: ./app/bespoke/src/seed/fixtures.ts
+
+qa:
+  credentials:
+    - { role: operator, username: jacob@vanlife.test, password: van-demo-2026 }
+    - { role: operator, username: partner@vanlife.test, password: van-demo-2026 }
+
+delivery:
+  imageName: vanlife
+  # Teahouse owns 18080; host port 8080 is broken on this machine.
+  port: 18081
+  dbVolume: vanlife-data
+  # Basemap archive + glyphs/sprites — external volume, survives down -v.
+  appMounts:
+    - { volume: vanlife-tiles, mountPath: /data/tiles }
+  sidecars:
+    - name: osrm
+      # No recent version tags exist on Docker Hub — pinned by digest instead.
+      image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
+      # --mmap keeps the multi-GB graph on the page cache instead of resident memory.
+      command: osrm-routed --algorithm mld --mmap --max-table-size 8000 /data/us-west-latest.osrm
+      volumes:
+        - { volume: vanlife-osrm, mountPath: /data }
+      memoryLimit: 6g

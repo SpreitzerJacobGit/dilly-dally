@@ -1,0 +1,428 @@
+# The data model — authored in the designer, the last step of planning.
+# Source of truth: app/bespoke/src/db/schema.ts is GENERATED from this file.
+# Element-owned tables are derived from the assembly manifest, not listed here.
+dataModelVersion: 1
+vertical: vanlife
+entities:
+  - id: trips
+    table: trips
+    title: Trip
+    description: A journey from an origin to an anchor destination, with its frozen budget baseline.
+    feature: trips
+    layout: { x: 60, y: 60 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - { name: name, column: name, type: text, notNull: true }
+      - name: status
+        column: status
+        type: text
+        notNull: true
+        default: planning
+        enum: [planning, active, completed, archived]
+      - { name: originName, column: origin_name, type: text, notNull: true }
+      - { name: originLat, column: origin_lat, type: real, notNull: true }
+      - { name: originLng, column: origin_lng, type: real, notNull: true }
+      - { name: destName, column: dest_name, type: text, notNull: true }
+      - { name: destLat, column: dest_lat, type: real, notNull: true }
+      - { name: destLng, column: dest_lng, type: real, notNull: true }
+      - name: directDurationMinutes
+        column: direct_duration_minutes
+        type: real
+        description: The frozen 1x baseline; the deviation budget is this times budget ratio.
+      - { name: deviationBudgetRatio, column: deviation_budget_ratio, type: real, notNull: true, default: 2 }
+      - { name: dailyDriveHours, column: daily_drive_hours, type: real, notNull: true, default: 4 }
+      - { name: startDate, column: start_date, type: text, semantic: iso-date }
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: trips_status, fields: [status] }
+  - id: waypoints
+    table: waypoints
+    title: Waypoint
+    description: A named stop shaping the trip — family visit, custom stop, or promoted place.
+    feature: trips
+    layout: { x: 360, y: 60 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: name, column: name, type: text, notNull: true }
+      - { name: lat, column: lat, type: real, notNull: true }
+      - { name: lng, column: lng, type: real, notNull: true }
+      - name: kind
+        column: kind
+        type: text
+        notNull: true
+        enum: [family, custom, poi]
+      - name: poiId
+        column: poi_id
+        type: integer
+        references: { entity: pois, field: id, onDelete: "set null" }
+      - { name: orderIndex, column: order_index, type: integer, notNull: true }
+      - name: status
+        column: status
+        type: text
+        notNull: true
+        default: pending
+        enum: [pending, visited, skipped]
+      - { name: arriveBy, column: arrive_by, type: text, semantic: iso-date }
+      - { name: notes, column: notes, type: text }
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: waypoints_trip_order, fields: [tripId, orderIndex] }
+  - id: pois
+    table: pois
+    title: Place
+    description: An aggregated point of interest from a public source, deduped on (source, sourceId).
+    feature: poi
+    layout: { x: 660, y: 60 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: source
+        column: source
+        type: text
+        notNull: true
+        enum: [overpass, nps, recgov, opencharge, ioverlander, manual]
+      - { name: sourceId, column: source_id, type: text, notNull: true }
+      - { name: name, column: name, type: text, notNull: true }
+      - name: category
+        column: category
+        type: text
+        notNull: true
+        enum: [campground, water-fill, dump-station, laundry, grocery, fuel, ev-charge, restroom, hike, boulder, bike, scenic, family, other]
+      - { name: subcategory, column: subcategory, type: text }
+      - { name: lat, column: lat, type: real, notNull: true }
+      - { name: lng, column: lng, type: real, notNull: true }
+      - name: popularity
+        column: popularity
+        type: real
+        description: Normalized 0-1 when the source has a signal; null means honestly unknown.
+      - { name: tags, column: tags, type: text, semantic: json }
+      - { name: url, column: url, type: text, semantic: url, description: Deep link out to the source's own page. }
+      - { name: fetchedAt, column: fetched_at, type: text, notNull: true, semantic: iso-datetime }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: pois_source_unique, fields: [source, sourceId], unique: true }
+      - { name: pois_category, fields: [category] }
+      - { name: pois_lat, fields: [lat] }
+  - id: poiMarks
+    table: poi_marks
+    title: Place mark
+    description: Pin or reject a place for a trip — the progressive-narrowing mechanism.
+    feature: poi
+    layout: { x: 960, y: 60 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - name: poiId
+        column: poi_id
+        type: integer
+        notNull: true
+        references: { entity: pois, field: id, onDelete: cascade }
+      - name: mark
+        column: mark
+        type: text
+        notNull: true
+        enum: [pinned, rejected]
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: poi_marks_trip_poi, fields: [tripId, poiId], unique: true }
+  - id: needs
+    table: needs
+    title: Recurring need
+    description: A tracked van-life need with capacity, thresholds, and its servicing place category.
+    feature: needs
+    layout: { x: 60, y: 380 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: key
+        column: need_key
+        type: text
+        notNull: true
+        unique: true
+        enum: [food, gas, water, laundry, trash, wastewater, electric, internet]
+      - { name: title, column: title, type: text, notNull: true }
+      - { name: unit, column: unit, type: text, notNull: true }
+      - { name: capacity, column: capacity, type: real, notNull: true }
+      - name: direction
+        column: direction
+        type: text
+        notNull: true
+        enum: [depletes, accumulates]
+        description: Water depletes toward empty; trash and wastewater accumulate toward full.
+      - name: warnRatio
+        column: warn_ratio
+        type: real
+        notNull: true
+        default: 0.25
+        description: Runway fraction at which the need is worth planning for.
+      - name: urgentRatio
+        column: urgent_ratio
+        type: real
+        notNull: true
+        default: 0.1
+        description: Runway fraction at which the need is urgent.
+      - name: poiCategory
+        column: poi_category
+        type: text
+        description: Which place category services this need; null for checklist-only concerns.
+      - name: routingDriver
+        column: routing_driver
+        type: boolean
+        notNull: true
+        default: true
+        description: Internet is tracked but never generates stops.
+      - { name: sortOrder, column: sort_order, type: integer, notNull: true }
+      - { name: active, column: active, type: boolean, notNull: true, default: true }
+  - id: needRates
+    table: need_rates
+    title: Consumption rate
+    description: Rate history per need; the current rate is the latest effectiveFrom. Derived rows only exist via an accepted suggestion.
+    feature: needs
+    layout: { x: 360, y: 380 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: needId
+        column: need_id
+        type: integer
+        notNull: true
+        references: { entity: needs, field: id, onDelete: cascade }
+      - { name: ratePerDay, column: rate_per_day, type: real, notNull: true }
+      - { name: ratePerMile, column: rate_per_mile, type: real, notNull: true, default: 0 }
+      - name: source
+        column: source
+        type: text
+        notNull: true
+        enum: [manual, derived]
+      - { name: effectiveFrom, column: effective_from, type: text, notNull: true, semantic: iso-datetime }
+      - { name: note, column: note, type: text }
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: need_rates_need_from, fields: [needId, effectiveFrom] }
+  - id: checkIns
+    table: check_ins
+    title: Check-in
+    description: The only way a level changes — a service event or an explicit correction, always attributed.
+    feature: checkins
+    layout: { x: 660, y: 380 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: needId
+        column: need_id
+        type: integer
+        notNull: true
+        references: { entity: needs, field: id, onDelete: cascade }
+      - name: kind
+        column: kind
+        type: text
+        notNull: true
+        enum: [service, set-level]
+        description: service with no quantity = full reset; with quantity = partial; set-level = absolute correction.
+      - { name: quantity, column: quantity, type: real }
+      - { name: note, column: note, type: text }
+      - { name: lat, column: lat, type: real }
+      - { name: lng, column: lng, type: real }
+      - name: poiId
+        column: poi_id
+        type: integer
+        references: { entity: pois, field: id, onDelete: "set null" }
+      - name: recordedBy
+        column: recorded_by
+        type: integer
+        notNull: true
+        references: { entity: users, field: id }
+      - name: clientId
+        column: client_id
+        type: text
+        unique: true
+        description: Client-generated id so an offline queue replay never records twice.
+      - { name: occurredAt, column: occurred_at, type: text, notNull: true, semantic: iso-datetime }
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: check_ins_need_time, fields: [needId, occurredAt] }
+  - id: progressEvents
+    table: progress_events
+    title: Progress event
+    description: The driving log — stop visits, leg completions, and manual position pins; feeds budget accounting and mileage drain.
+    feature: routes
+    layout: { x: 960, y: 380 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - name: kind
+        column: kind
+        type: text
+        notNull: true
+        enum: [stop-visited, leg-completed, position-set]
+      - { name: lat, column: lat, type: real, notNull: true }
+      - { name: lng, column: lng, type: real, notNull: true }
+      - { name: milesDriven, column: miles_driven, type: real, notNull: true, default: 0 }
+      - { name: driveSeconds, column: drive_seconds, type: real, notNull: true, default: 0 }
+      - name: candidateId
+        column: candidate_id
+        type: integer
+        references: { entity: routeCandidates, field: id, onDelete: "set null" }
+      - { name: stopSeq, column: stop_seq, type: integer }
+      - name: recordedBy
+        column: recorded_by
+        type: integer
+        notNull: true
+        references: { entity: users, field: id }
+      - { name: occurredAt, column: occurred_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: progress_events_trip_time, fields: [tripId, occurredAt] }
+  - id: routeCandidates
+    table: route_candidates
+    title: Route candidate
+    description: One day-leg proposal — role tier, verified geometry, gray continuation, and honest warnings.
+    feature: routes
+    layout: { x: 60, y: 700 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: planDate, column: plan_date, type: text, notNull: true, semantic: iso-date }
+      - name: tier
+        column: tier
+        type: text
+        notNull: true
+        enum: [direct, balanced, scenic, side-quest, max]
+      - { name: title, column: title, type: text, notNull: true }
+      - { name: summary, column: summary, type: text }
+      - { name: score, column: score, type: real, notNull: true, default: 0 }
+      - { name: durationMinutes, column: duration_minutes, type: real, notNull: true }
+      - { name: distanceMiles, column: distance_miles, type: real, notNull: true }
+      - name: remainingBudgetMinutes
+        column: remaining_budget_minutes
+        type: real
+        description: Budget left after this day plus the direct continuation - the honesty figure behind ROUTE-1.
+      - { name: geometry, column: geometry, type: text, notNull: true, semantic: json, description: GeoJSON LineString of today's leg. }
+      - { name: projectedGeometry, column: projected_geometry, type: text, semantic: json, description: Gray continuation to the anchor. }
+      - { name: warnings, column: warnings, type: text, semantic: json }
+      - name: status
+        column: status
+        type: text
+        notNull: true
+        default: proposed
+        enum: [proposed, selected, expired]
+      - { name: generatedAt, column: generated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: route_candidates_trip_date, fields: [tripId, planDate] }
+  - id: routeLegs
+    table: route_legs
+    title: Route stop
+    description: An ordered stop of a candidate, annotated with the need it services.
+    feature: routes
+    layout: { x: 360, y: 700 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: candidateId
+        column: candidate_id
+        type: integer
+        notNull: true
+        references: { entity: routeCandidates, field: id, onDelete: cascade }
+      - { name: orderIndex, column: order_index, type: integer, notNull: true }
+      - { name: toName, column: to_name, type: text, notNull: true }
+      - { name: toLat, column: to_lat, type: real, notNull: true }
+      - { name: toLng, column: to_lng, type: real, notNull: true }
+      - name: poiId
+        column: poi_id
+        type: integer
+        references: { entity: pois, field: id, onDelete: "set null" }
+      - name: waypointId
+        column: waypoint_id
+        type: integer
+        references: { entity: waypoints, field: id, onDelete: "set null" }
+      - name: needId
+        column: need_id
+        type: integer
+        references: { entity: needs, field: id, onDelete: "set null" }
+        description: The need this stop services, when it is a service stop.
+      - name: purpose
+        column: purpose
+        type: text
+        notNull: true
+        enum: [drive, resupply, fuel, water, dump, laundry, charge, sight, camp, family]
+      - { name: etaMinutesFromStart, column: eta_minutes_from_start, type: real, notNull: true }
+      - { name: cumMiles, column: cum_miles, type: real, notNull: true }
+      - { name: dwellMinutes, column: dwell_minutes, type: real, notNull: true, default: 0 }
+    indexes:
+      - { name: route_legs_candidate_order, fields: [candidateId, orderIndex] }
+  - id: daySelections
+    table: day_selections
+    title: Day selection
+    description: The authoritative pick for a day - one per trip per date.
+    feature: routes
+    layout: { x: 660, y: 700 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: planDate, column: plan_date, type: text, notNull: true, semantic: iso-date }
+      - name: candidateId
+        column: candidate_id
+        type: integer
+        notNull: true
+        references: { entity: routeCandidates, field: id }
+      - name: selectedBy
+        column: selected_by
+        type: integer
+        notNull: true
+        references: { entity: users, field: id }
+      - { name: selectedAt, column: selected_at, type: text, notNull: true, semantic: iso-datetime }
+      - { name: completedAt, column: completed_at, type: text, semantic: iso-datetime }
+      - { name: notes, column: notes, type: text }
+    indexes:
+      - { name: day_selections_trip_date, fields: [tripId, planDate], unique: true }
+  - id: digests
+    table: digests
+    title: Daily digest
+    description: The composed morning digest - readable in-app regardless of push delivery, one per trip per date.
+    feature: digest
+    layout: { x: 960, y: 700 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: date, column: date, type: text, notNull: true, semantic: iso-date }
+      - { name: body, column: body, type: text, notNull: true, semantic: json }
+      - name: priority
+        column: priority
+        type: text
+        notNull: true
+        default: default
+        enum: [default, high, urgent]
+      - { name: generatedAt, column: generated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: digests_trip_date, fields: [tripId, date], unique: true }
+  - id: interestWeights
+    table: interest_weights
+    title: Interest weight
+    description: Per-category bias for side-quest scoring; zero excludes the category entirely.
+    feature: interests
+    layout: { x: 60, y: 1020 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - { name: category, column: category, type: text, notNull: true, unique: true }
+      - { name: weight, column: weight, type: real, notNull: true, default: 1 }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }

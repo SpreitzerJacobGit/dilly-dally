@@ -1,0 +1,30 @@
+{
+  "vertical": "vanlife",
+  "startCommand": "docker compose -f verticals/vanlife/deploy/compose.yaml up -d --build",
+  "resetCommand": "docker compose -f verticals/vanlife/deploy/compose.yaml down -v",
+  "baseUrl": "http://localhost:18081",
+  "readySignal": {
+    "kind": "http",
+    "path": "/readyz",
+    "expectStatus": 200,
+    "timeoutMs": 180000
+  },
+  "intentDocPath": "verticals/vanlife/intent.md",
+  "credentials": [
+    {
+      "role": "operator",
+      "username": "jacob@vanlife.test",
+      "password": "van-demo-2026"
+    },
+    {
+      "role": "operator",
+      "username": "partner@vanlife.test",
+      "password": "van-demo-2026"
+    }
+  ],
+  "proof": {
+    "routerModule": "verticals/vanlife/app/server/src/router.ts",
+    "trpcClientModule": "verticals/vanlife/app/bespoke/src/client/trpc.ts",
+    "tsconfigPath": "verticals/vanlife/app/tsconfig.proof.json"
+  }
+}

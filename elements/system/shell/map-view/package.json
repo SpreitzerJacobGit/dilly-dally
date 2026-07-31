@@ -1,0 +1,18 @@
+{
+  "name": "@elements/shell-map-view",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client/index.ts"
+  },
+  "dependencies": {
+    "@elements/lifecycle-service-runtime": "workspace:*",
+    "@fastify/static": "catalog:",
+    "@protomaps/basemaps": "catalog:",
+    "fastify": "catalog:",
+    "maplibre-gl": "catalog:",
+    "pmtiles": "catalog:"
+  }
+}

@@ -1,0 +1,29 @@
+# GENERATED FROM assembly.manifest.yaml — DO NOT EDIT
+name: vanlife
+services:
+  app:
+    image: vanlife:0.1.0-8af878c9
+    build:
+      context: ../../..
+      dockerfile: verticals/vanlife/deploy/Dockerfile
+    ports:
+      - "18081:18081"
+    volumes:
+      - vanlife-data:/data
+      - vanlife-tiles:/data/tiles
+    depends_on:
+      - osrm
+    restart: unless-stopped
+  osrm:
+    image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
+    command: osrm-routed --algorithm mld --mmap --max-table-size 8000 /data/us-west-latest.osrm
+    volumes:
+      - vanlife-osrm:/data
+    mem_limit: 6g
+    restart: unless-stopped
+volumes:
+  vanlife-data:
+  vanlife-osrm:
+    external: true
+  vanlife-tiles:
+    external: true
