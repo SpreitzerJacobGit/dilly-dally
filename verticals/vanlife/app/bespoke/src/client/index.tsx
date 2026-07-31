@@ -2,6 +2,7 @@
  * Bespoke client layer for Dilly-Dally: pages and navigation.
  */
 import type { JSX } from "react";
+import { AnchorsPage } from "./pages/AnchorsPage.js";
 import { DashboardPage } from "./pages/DashboardPage.js";
 import { NeedsPage } from "./pages/NeedsPage.js";
 import { TripPage } from "./pages/TripPage.js";
@@ -29,6 +30,7 @@ export interface BespokePage {
 export const bespokePages: BespokePage[] = [
   { path: "/", nav: { label: "Map" }, component: DashboardPage },
   { path: "/needs", nav: { label: "Needs" }, component: NeedsPage },
+  { path: "/anchors", nav: { label: "Anchors" }, component: AnchorsPage },
   { path: "/trip", nav: { label: "Trip" }, component: TripPage },
   { path: "/settings", nav: { label: "Settings" }, component: SettingsPage },
   { path: "/status", nav: { label: "Status" }, component: StatusPage },

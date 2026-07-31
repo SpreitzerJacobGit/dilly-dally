@@ -65,14 +65,26 @@ export function elementToRecord(el: OverpassElement): PoiRecord | null {
   };
 }
 
-export function createOverpassAdapter(opts?: { endpoint?: string }): PoiSourceAdapter {
+/**
+ * Overpass's usage policy expects clients to identify themselves, and the
+ * public endpoint enforces it: a request with no User-Agent is answered with
+ * 406 Not Acceptable, every time. Node's fetch sends none by default, so this
+ * header is what makes the source work at all — not a nicety.
+ */
+const USER_AGENT = "dilly-dally-poi-sources/0.1.0";
+
+export function createOverpassAdapter(opts?: { endpoint?: string; userAgent?: string }): PoiSourceAdapter {
   const endpoint = opts?.endpoint ?? "https://overpass-api.de/api/interpreter";
+  const userAgent = opts?.userAgent ?? USER_AGENT;
   return {
     source: "overpass",
     async fetchRegion(region: PoiRegion) {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": userAgent,
+        },
         body: `data=${encodeURIComponent(buildQuery(region.bbox))}`,
       });
       if (!res.ok) {

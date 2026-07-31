@@ -62,6 +62,15 @@ export const VL_STYLES = `
   border: 3px solid #fff; box-shadow: 0 0 0 4px #2563eb44; animation: vl-pulse 2s infinite; }
 @keyframes vl-pulse { 0% { box-shadow: 0 0 0 4px #2563eb44; } 50% { box-shadow: 0 0 0 10px #2563eb11; } 100% { box-shadow: 0 0 0 4px #2563eb44; } }
 
+/* A failed basemap must say so rather than render as a silent grey rectangle. */
+/* Sits below the digest banner rather than over it. */
+.vl-basemap-error { position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 5; max-width: 420px; display: flex; flex-direction: column; gap: 2px;
+  background: #fef3c7; border: 1px solid #d97706; border-radius: 8px; padding: 8px 12px;
+  font-size: .85rem; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.vl-basemap-error span { word-break: break-word; }
+.vl-basemap-error-hint { color: #6b5200; }
+
 .vl-toast { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: #1f2937; color: #fff; border-radius: 8px; padding: 10px 14px; font-size: .9rem;
   display: flex; gap: 12px; align-items: center; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
@@ -81,4 +90,57 @@ export const VL_STYLES = `
 .vl-popover h4 { margin: 0 0 4px; }
 .vl-popover .vl-meta { color: #666; font-size: .8rem; }
 .vl-popover .vl-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* Anchors: an indented tree, so nesting depth reads as specificity. */
+.vl-anchor-row { border: 1px solid #e2e2e2; border-left-width: 4px; border-left-color: #0f766e;
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; background: #fff; cursor: pointer; }
+.vl-anchor-row.vl-anchor-selected { box-shadow: 0 0 0 2px #0f766e33; }
+.vl-anchor-row.vl-anchor-dim { opacity: .55; }
+.vl-anchor-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vl-anchor-sub { color: #555; font-size: .8rem; margin-top: 2px; }
+.vl-anchor-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.vl-anchor-actions button { font-size: .75rem; padding: 2px 6px; }
+.vl-chip { background: #f1f5f9; border-radius: 10px; padding: 1px 7px; font-size: .72rem; color: #334155; }
+.vl-chip-warn { background: #fef3c7; color: #92400e; }
+
+.vl-anchor-editor { border: 1px dashed #0f766e; border-radius: 8px; padding: 10px;
+  margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.vl-anchor-editor label { display: block; font-size: .8rem; }
+.vl-hits { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
+.vl-hits button { display: block; width: 100%; text-align: left; font-size: .8rem;
+  background: none; border: none; border-bottom: 1px solid #eee; padding: 6px 4px; cursor: pointer; }
+
+.vl-anchor-detail { border-top: 1px solid #e2e2e2; margin-top: 14px; padding-top: 10px; }
+.vl-anchor-detail h4 { margin: 0 0 6px; }
+.vl-anchor-detail h5 { margin: 12px 0 4px; font-size: .85rem; }
+.vl-anchor-detail label { display: block; font-size: .8rem; margin-bottom: 8px; }
+.vl-suggestions { list-style: none; margin: 4px 0 0; padding: 0; }
+.vl-suggestions li { display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; padding: 4px 0; border-bottom: 1px solid #f1f1f1; font-size: .85rem; }
+.vl-suggestions button { font-size: .75rem; padding: 2px 6px; margin-left: 4px; }
+
+/* Drag and drop: the drop indicator has to say which of the two things is
+   about to happen — reorder between, or nest into. */
+.vl-anchor-tree { min-height: 40px; }
+.vl-anchor-row { position: relative; }
+.vl-anchor-row[draggable="true"] { cursor: grab; }
+.vl-anchor-row.vl-anchor-dragging { opacity: .4; cursor: grabbing; }
+.vl-drag-grip { color: #9ca3af; cursor: grab; font-size: .9rem; line-height: 1; user-select: none; }
+.vl-anchor-row.vl-drop-into { outline: 2px solid #0f766e; outline-offset: 1px; background: #f0fdfa; }
+.vl-anchor-row.vl-drop-before::before,
+.vl-anchor-row.vl-drop-after::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 3px;
+  background: #0f766e; border-radius: 2px; }
+.vl-anchor-row.vl-drop-before::before { top: -3px; }
+.vl-anchor-row.vl-drop-after::after { bottom: -3px; }
+.vl-anchor-tree.vl-drop-root { outline: 2px dashed #0f766e; outline-offset: 4px; border-radius: 8px; }
+.vl-drop-hint { color: #94a3b8; font-size: .75rem; margin-top: 6px; }
+
+/* Map handles for the selected anchor. */
+.vl-anchor-handle { border-radius: 50%; border: 2px solid #fff; cursor: grab;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.vl-anchor-handle:active { cursor: grabbing; }
+.vl-anchor-handle-center { width: 16px; height: 16px; background: #0f766e; }
+.vl-anchor-handle-edge { width: 13px; height: 13px; background: #fff; border-color: #0f766e;
+  box-shadow: 0 0 0 3px #0f766e33; }
 `;

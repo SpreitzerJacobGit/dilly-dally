@@ -13,7 +13,7 @@ import {
   FIXTURE_NEEDS,
   FIXTURE_POIS,
   FIXTURE_TRIP,
-  FIXTURE_WAYPOINT,
+  FIXTURE_ANCHOR,
   FIXTURE_WEIGHTS,
 } from "../seed/fixtures.js";
 
@@ -52,13 +52,16 @@ export const seedVanlifeData: SeedFn = {
 
     await db.insert(waypoints).values({
       tripId: trip.id,
-      name: FIXTURE_WAYPOINT.name,
-      lat: FIXTURE_WAYPOINT.lat,
-      lng: FIXTURE_WAYPOINT.lng,
-      kind: FIXTURE_WAYPOINT.kind,
+      name: FIXTURE_ANCHOR.name,
+      lat: FIXTURE_ANCHOR.lat,
+      lng: FIXTURE_ANCHOR.lng,
+      radiusMiles: FIXTURE_ANCHOR.radiusMiles,
+      parentId: null,
+      depth: 0,
+      kind: FIXTURE_ANCHOR.kind,
       orderIndex: 0,
       status: "pending",
-      notes: FIXTURE_WAYPOINT.notes,
+      notes: FIXTURE_ANCHOR.notes,
       createdAt: iso(FIXTURE_TRIP.startedDaysAgo),
     });
 

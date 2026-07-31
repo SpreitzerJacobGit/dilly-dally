@@ -137,12 +137,21 @@ export const FIXTURE_TRIP = {
   startedDaysAgo: 2,
 };
 
-export const FIXTURE_WAYPOINT = {
-  name: "Bishop, CA",
-  lat: 37.3635,
-  lng: -118.3951,
+/**
+ * A broad area anchor rather than a bare pin: the route must pass through the
+ * eastern Sierra somewhere, and the engine picks the concrete spot. Centered
+ * and sized so the whole US-395 corridor — Mono Lake, June Lake, Bishop, the
+ * Buttermilks, Alabama Hills — is inside, while Reno (159 mi), Carson City
+ * (136 mi) and Susanville (234 mi) are demonstrably outside. Narrowing it to
+ * Bishop or the Buttermilks is what the operator does in the demo.
+ */
+export const FIXTURE_ANCHOR = {
+  name: "Eastern Sierra / US-395 corridor",
+  lat: 37.45,
+  lng: -118.55,
+  radiusMiles: 110,
   kind: "custom" as const,
-  notes: "Route through California — the US-395 corridor",
+  notes: "Route me through here somewhere — anywhere along 395 qualifies.",
 };
 
 export const FIXTURE_WEIGHTS: { category: string; weight: number }[] = [
@@ -181,7 +190,7 @@ export function seedIntentSection(): string {
   };
 
   claim(
-    `One active trip exists: "${FIXTURE_TRIP.name}" from ${FIXTURE_TRIP.originName} to ${FIXTURE_TRIP.destName}, with one pending waypoint, ${FIXTURE_WAYPOINT.name}, biasing the route through California.`,
+    `One active trip exists: "${FIXTURE_TRIP.name}" from ${FIXTURE_TRIP.originName} to ${FIXTURE_TRIP.destName}, with one pending ${String(FIXTURE_ANCHOR.radiusMiles)}-mile area anchor, "${FIXTURE_ANCHOR.name}", that every generated route must pass through; it resolves automatically to the best-scoring place inside it and can be narrowed to a specific one.`,
   );
   claim(`The needs screen lists exactly ${String(FIXTURE_NEEDS.length)} needs.`);
 

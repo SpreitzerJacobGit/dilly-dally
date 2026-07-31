@@ -32,6 +32,24 @@ export interface MapPoiView {
   lng: number;
 }
 
+/**
+ * An anchor region to draw. The ring arrives pre-computed — the map never does
+ * geometry, which is what keeps this component presentation-only.
+ */
+export interface MapAnchorView {
+  id: number;
+  name: string;
+  center: { lat: number; lng: number };
+  radiusMiles: number;
+  /** Closed ring in [lng, lat] order. Null for an exact-point anchor. */
+  ring: [number, number][] | null;
+  depth: number;
+  state: "pending" | "visited" | "skipped";
+  /** Where the route actually passes through, if resolved. */
+  resolved: { lat: number; lng: number } | null;
+  selected: boolean;
+}
+
 export interface MapViewProps {
   routes: CandidateRouteView[];
   highlightedId: number | null;
@@ -44,4 +62,21 @@ export interface MapViewProps {
   onPoiClick: (id: number) => void;
   onViewportChange: (bbox: { south: number; west: number; north: number; east: number }, zoom: number) => void;
   heightStyle: string;
+  /** Anchor regions to draw beneath the routes. */
+  anchors?: MapAnchorView[];
+  /** Live preview while placing or resizing, drawn dashed. */
+  draftAnchor?: MapAnchorView | null;
+  onAnchorClick?: (id: number) => void;
+  /** Fires on any map click the layers did not consume; the page decides if it cares. */
+  onMapClick?: (point: { lat: number; lng: number }) => void;
+  /**
+   * Centre handle dragged. Fires continuously with `done: false` for a live
+   * preview, then once with `done: true` to commit.
+   */
+  onAnchorCenterDrag?: (id: number, center: { lat: number; lng: number }, done: boolean) => void;
+  /**
+   * Edge handle dragged, reporting the handle's raw position — the caller
+   * converts that to a radius, so this component stays free of geometry.
+   */
+  onAnchorRadiusDrag?: (id: number, handle: { lat: number; lng: number }, done: boolean) => void;
 }

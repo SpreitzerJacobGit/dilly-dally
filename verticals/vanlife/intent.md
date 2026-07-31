@@ -48,6 +48,8 @@ A trip runs from an origin to an anchor destination. Waypoints — family visits
 `[TRIP-3]` Exactly one trip is active at a time; the dashboard, candidates, needs outlook, and digest all reflect the active trip, and completing a trip archives it with its history intact.
 `[TRIP-4]` The trip screen shows progress toward the anchor and how much of the deviation budget has been spent, and these figures change only as driving is recorded — never by the mere passage of time.
 `[TRIP-5]` An operator can set the current position manually ("we are here"); plans generated afterwards start from that position.
+`[TRIP-6]` A waypoint can be given a radius, becoming an area the route must pass through; every generated candidate and its projected continuation enter that area, and the app states which concrete place inside it was chosen, or admits that none was known.
+`[TRIP-7]` An area anchor can be narrowed by promoting a place inside it into a child anchor; the narrower child replaces its parent in routing, and removing the child restores the parent's broader choice.
 
 ## 5. Recurring needs & levels
 Every recurring need is tracked as an estimated level with a capacity, a consumption rate, and a threshold. Estimates are honest about being estimates.

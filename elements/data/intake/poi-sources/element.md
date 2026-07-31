@@ -39,4 +39,4 @@ Additional adapters (AllTrails, iOverlander exports, state park systems) impleme
 
 ## Limits
 
-Poll-latency freshness only — no realtime. Overpass is a shared public service: keep regions corridor-sized, refresh daily, and expect occasional 429/504s to surface as honest errors. NPS has no bbox parameter (national lists filtered locally); RIDB search is radius-based with a 50-mile cap, so oversized regions are under-covered at their corners. Popularity is sparse and source-dependent; absent signals are null, never invented.
+Poll-latency freshness only — no realtime. Overpass is a shared public service: keep regions corridor-sized, refresh daily, and expect occasional 429/504s to surface as honest errors. It also requires callers to identify themselves — a request without a `User-Agent` is refused with 406, and Node's `fetch` sends none by default, so the adapter always sets one (overridable per instance). NPS has no bbox parameter (national lists filtered locally); RIDB search is radius-based with a 50-mile cap, so oversized regions are under-covered at their corners. Popularity is sparse and source-dependent; absent signals are null, never invented.
