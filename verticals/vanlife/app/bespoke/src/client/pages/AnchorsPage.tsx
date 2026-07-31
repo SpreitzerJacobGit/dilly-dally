@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 import { trpc } from "../trpc.js";
 import type { PageUser } from "../index.js";
 import { MapView } from "../map/MapView.js";
-import type { MapAnchorView, MapPoiView } from "../map/types.js";
+import { DRAFT_TARGET_ID, type MapTargetView, type MapPoiView } from "../map/types.js";
 import { ringFor } from "../lib/anchorRing.js";
 import { geocode, type GeocodeHit } from "../lib/geocode.js";
 import { haversineMiles } from "../../server/engine/geo.js";
@@ -182,7 +182,7 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     updateMut.mutate({ id, radiusMiles });
   };
 
-  const mapAnchors: MapAnchorView[] = flat.map((a) => ({
+  const mapTargets: MapTargetView[] = flat.map((a) => ({
     id: a.id,
     name: a.name,
     center: a.center,
@@ -192,12 +192,14 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     state: (a.status === "visited" || a.status === "skipped" ? a.status : "pending"),
     resolved: a.resolved?.point ?? null,
     selected: a.id === selectedId,
+    final: false,
+    ordinal: null,
   }));
 
   // A live drag preview wins over the placement draft — only one can be active.
-  const draftAnchor: MapAnchorView | null = dragging
+  const draftAnchor: MapTargetView | null = dragging
     ? {
-        id: -1,
+        id: DRAFT_TARGET_ID,
         name: flat.find((a) => a.id === dragging.id)?.name ?? "",
         center: dragging.center,
         radiusMiles: dragging.radiusMiles,
@@ -206,10 +208,12 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
         state: "pending",
         resolved: null,
         selected: true,
+        final: false,
+        ordinal: null,
       }
     : draft
       ? {
-          id: -1,
+          id: DRAFT_TARGET_ID,
           name: draft.name,
           center: draft.center,
           radiusMiles: draft.radiusMiles,
@@ -218,6 +222,8 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
           state: "pending",
           resolved: null,
           selected: true,
+          final: false,
+          ordinal: null,
         }
       : null;
 
@@ -320,14 +326,14 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
             pois={suggestionPois}
             position={tripQ.data?.position ?? null}
             fitKey={fitKey}
-            anchors={mapAnchors}
-            draftAnchor={draftAnchor}
+            targets={mapTargets}
+            draftTarget={draftAnchor}
             onSelectRoute={() => undefined}
             onStopClick={() => undefined}
             onPoiClick={() => undefined}
-            onAnchorClick={(id) => setSelectedId(id)}
-            onAnchorCenterDrag={onCenterDrag}
-            onAnchorRadiusDrag={onRadiusDrag}
+            onTargetClick={(id) => setSelectedId(id)}
+            onTargetCenterDrag={onCenterDrag}
+            onTargetRadiusDrag={onRadiusDrag}
             onMapClick={(point) => {
               if (!placing) return;
               setDraft((d) => ({

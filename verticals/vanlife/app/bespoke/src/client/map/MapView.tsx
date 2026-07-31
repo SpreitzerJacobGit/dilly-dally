@@ -9,7 +9,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle, initMapLibre } from "@elements/shell-map-view/client";
 import { CATEGORY_COLORS, PROJECTED_COLOR, ROLE_COLORS } from "./palette.js";
-import type { CandidateRouteView, MapAnchorView, MapViewProps } from "./types.js";
+import type { CandidateRouteView, MapTargetView, MapViewProps } from "./types.js";
 
 /**
  * Imperative MapLibre wrapped in a presentation-only component: props in,
@@ -61,8 +61,8 @@ function poisToGeojson(pois: MapViewProps["pois"]) {
   };
 }
 
-function anchorsToGeojson(anchors: MapAnchorView[], draft: MapAnchorView | null) {
-  const all = [...anchors, ...(draft ? [draft] : [])];
+function targetsToGeojson(targets: MapTargetView[], draft: MapTargetView | null) {
+  const all = [...targets, ...(draft ? [draft] : [])];
   return {
     type: "FeatureCollection" as const,
     features: all
@@ -83,7 +83,14 @@ function anchorsToGeojson(anchors: MapAnchorView[], draft: MapAnchorView | null)
 }
 
 /** Depth reads as nesting: the broad parent recedes, the narrow child asserts. */
-const anchorColorExpr = [
+const DEPTH_COLORS = ["#0f766e", "#0891b2", "#6366f1"];
+
+/** The same ramp as targetColorExpr, for DOM markers that can't use expressions. */
+function depthColor(depth: number): string {
+  return DEPTH_COLORS[depth] ?? DEPTH_COLORS[0]!;
+}
+
+const targetColorExpr = [
   "match",
   ["get", "depth"],
   0,
@@ -113,7 +120,7 @@ export function MapView(props: MapViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Marker[]>([]);
-  const anchorHandlesRef = useRef<Marker[]>([]);
+  const targetHandlesRef = useRef<Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [basemapError, setBasemapError] = useState<string | null>(null);
   const propsRef = useRef(props);
@@ -144,18 +151,18 @@ export function MapView(props: MapViewProps): JSX.Element {
     });
 
     map.on("load", () => {
-      map.addSource("anchors", { type: "geojson", data: anchorsToGeojson([], null) });
+      map.addSource("targets", { type: "geojson", data: targetsToGeojson([], null) });
       map.addSource("projected", { type: "geojson", data: projectedToGeojson([]) });
       map.addSource("routes", { type: "geojson", data: routesToGeojson([], null) });
       map.addSource("pois", { type: "geojson", data: poisToGeojson([]) });
 
       // Anchors first, so every route line draws on top of the regions.
       map.addLayer({
-        id: "anchors-fill",
+        id: "targets-fill",
         type: "fill",
-        source: "anchors",
+        source: "targets",
         paint: {
-          "fill-color": anchorColorExpr,
+          "fill-color": targetColorExpr,
           "fill-opacity": [
             "case",
             ["get", "dimmed"],
@@ -167,11 +174,11 @@ export function MapView(props: MapViewProps): JSX.Element {
         },
       });
       map.addLayer({
-        id: "anchors-outline",
+        id: "targets-outline",
         type: "line",
-        source: "anchors",
+        source: "targets",
         paint: {
-          "line-color": anchorColorExpr,
+          "line-color": targetColorExpr,
           "line-width": ["case", ["get", "selected"], 2.5, 1.5] as unknown as number,
           "line-opacity": ["case", ["get", "dimmed"], 0.3, 0.9] as unknown as number,
           "line-dasharray": ["case", ["get", "draft"], ["literal", [2, 2]], ["literal", [1, 0]]] as unknown as number[],
@@ -233,12 +240,12 @@ export function MapView(props: MapViewProps): JSX.Element {
         if (id !== undefined) propsRef.current.onPoiClick(id);
         e.preventDefault();
       });
-      map.on("click", "anchors-fill", (e: MapLayerMouseEvent) => {
+      map.on("click", "targets-fill", (e: MapLayerMouseEvent) => {
         // Routes and places sit on top and claim the click first; only an
         // otherwise-empty part of a region selects the region.
         if (e.defaultPrevented) return;
         const id = e.features?.[0]?.properties?.id as number | undefined;
-        if (id !== undefined) propsRef.current.onAnchorClick?.(id);
+        if (id !== undefined) propsRef.current.onTargetClick?.(id);
         e.preventDefault();
       });
       map.on("click", (e: MapLayerMouseEvent) => {
@@ -266,7 +273,7 @@ export function MapView(props: MapViewProps): JSX.Element {
 
     return () => {
       for (const m of markersRef.current) m.remove();
-      for (const m of anchorHandlesRef.current) m.remove();
+      for (const m of targetHandlesRef.current) m.remove();
       map.remove();
       mapRef.current = null;
     };
@@ -285,10 +292,10 @@ export function MapView(props: MapViewProps): JSX.Element {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    (map.getSource("anchors") as GeoJSONSource | undefined)?.setData(
-      anchorsToGeojson(props.anchors ?? [], props.draftAnchor ?? null),
+    (map.getSource("targets") as GeoJSONSource | undefined)?.setData(
+      targetsToGeojson(props.targets ?? [], props.draftTarget ?? null),
     );
-  }, [props.anchors, props.draftAnchor, ready]);
+  }, [props.targets, props.draftTarget, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -322,16 +329,48 @@ export function MapView(props: MapViewProps): JSX.Element {
     if (props.position) {
       const el = document.createElement("div");
       el.className = "vl-position-pin";
+      el.title = "Last recorded position";
       markersRef.current.push(
         new Marker({ element: el })
           .setLngLat([props.position.lng, props.position.lat])
           .addTo(map),
       );
     }
-  }, [props.routes, props.highlightedId, props.position, ready]);
+
+    if (props.origin) {
+      const el = document.createElement("div");
+      el.className = "vl-origin-pin";
+      el.title = `Origin — ${props.origin.name}`;
+      markersRef.current.push(
+        new Marker({ element: el }).setLngLat([props.origin.lng, props.origin.lat]).addTo(map),
+      );
+    }
+
+    // Exact-point Targets have no ring, so the fill layer draws nothing for
+    // them — including the destination. Pins are what make them exist on the
+    // map at all. DOM markers rather than a symbol layer: a symbol layer needs
+    // glyphs, and a glyph 404 would leave an unlabelled dot behind.
+    for (const t of props.targets ?? []) {
+      if (t.radiusMiles > 0 && !t.final) continue;
+      const el = document.createElement("button");
+      el.className =
+        "vl-target-pin" +
+        (t.final ? " vl-target-pin-final" : "") +
+        (t.selected ? " vl-target-pin-selected" : "") +
+        (t.state === "pending" ? "" : " vl-target-pin-dim");
+      el.textContent = t.final ? "★" : t.ordinal === null ? "•" : String(t.ordinal);
+      el.title = t.final ? `${t.name} — final Target` : t.name;
+      if (!t.final) el.style.background = depthColor(t.depth);
+      el.onclick = (ev) => {
+        ev.stopPropagation();
+        propsRef.current.onTargetClick?.(t.id);
+      };
+      markersRef.current.push(new Marker({ element: el }).setLngLat([t.center.lng, t.center.lat]).addTo(map));
+    }
+  }, [props.routes, props.highlightedId, props.position, props.origin, props.targets, ready]);
 
   /**
-   * Drag handles for the selected anchor: one at the centre to move the region,
+   * Drag handles for the selected Target: one at the centre to move the region,
    * one on its edge to resize it. The edge handle reports its raw position and
    * the page turns that into a radius — converting here would mean doing
    * geometry, which is exactly what this component does not do.
@@ -339,11 +378,11 @@ export function MapView(props: MapViewProps): JSX.Element {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    for (const m of anchorHandlesRef.current) m.remove();
-    anchorHandlesRef.current = [];
+    for (const m of targetHandlesRef.current) m.remove();
+    targetHandlesRef.current = [];
 
-    const selected = (props.anchors ?? []).find((a) => a.selected);
-    if (!selected || !props.onAnchorCenterDrag || selected.radiusMiles <= 0) return;
+    const selected = (props.targets ?? []).find((a) => a.selected);
+    if (!selected || !props.onTargetCenterDrag || selected.radiusMiles <= 0) return;
 
     const centerEl = document.createElement("div");
     centerEl.className = "vl-anchor-handle vl-anchor-handle-center";
@@ -353,18 +392,18 @@ export function MapView(props: MapViewProps): JSX.Element {
       .addTo(map);
     centerMarker.on("drag", () => {
       const p = centerMarker.getLngLat();
-      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+      propsRef.current.onTargetCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
     });
     centerMarker.on("dragend", () => {
       const p = centerMarker.getLngLat();
-      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+      propsRef.current.onTargetCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
     });
-    anchorHandlesRef.current.push(centerMarker);
+    targetHandlesRef.current.push(centerMarker);
 
     // The ring is generated from due north clockwise, so a quarter of the way
     // round is due east — picked by index, not computed.
     const ring = selected.ring;
-    if (ring && ring.length > 4 && props.onAnchorRadiusDrag) {
+    if (ring && ring.length > 4 && props.onTargetRadiusDrag) {
       const east = ring[Math.floor((ring.length - 1) / 4)]!;
       const edgeEl = document.createElement("div");
       edgeEl.className = "vl-anchor-handle vl-anchor-handle-edge";
@@ -374,32 +413,61 @@ export function MapView(props: MapViewProps): JSX.Element {
         .addTo(map);
       edgeMarker.on("drag", () => {
         const p = edgeMarker.getLngLat();
-        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+        propsRef.current.onTargetRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
       });
       edgeMarker.on("dragend", () => {
         const p = edgeMarker.getLngLat();
-        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+        propsRef.current.onTargetRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
       });
-      anchorHandlesRef.current.push(edgeMarker);
+      targetHandlesRef.current.push(edgeMarker);
     }
-  }, [props.anchors, ready]);
+  }, [props.targets, ready]);
 
-  // Fit to routes when asked.
+  /**
+   * Fit when asked. `fitTo` frames exactly what it is given — selecting a
+   * Target passes its own ring, so the view does not zoom back out to the whole
+   * trip. With no `fitTo`, everything drawn is framed: routes, position, Origin
+   * and every Target. Leaving Targets out of that gather is why fitting to one
+   * used to do nothing whenever no route was on the map.
+   */
   const lastFitKey = useRef("");
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || props.fitKey === lastFitKey.current) return;
     lastFitKey.current = props.fitKey;
-    const coords = props.routes.flatMap((r) => [...r.coordinates, ...(r.projected ?? [])]);
-    if (props.position) coords.push([props.position.lng, props.position.lat]);
-    if (coords.length < 2) return;
+
+    let coords: [number, number][];
+    if (props.fitTo && props.fitTo.length > 0) {
+      coords = props.fitTo;
+    } else {
+      coords = props.routes.flatMap((r) => [...r.coordinates, ...(r.projected ?? [])]);
+      if (props.position) coords.push([props.position.lng, props.position.lat]);
+      if (props.origin) coords.push([props.origin.lng, props.origin.lat]);
+      for (const t of props.targets ?? []) {
+        if (t.ring && t.ring.length > 3) coords.push(...t.ring);
+        else coords.push([t.center.lng, t.center.lat]);
+      }
+      if (props.draftTarget?.ring) coords.push(...props.draftTarget.ring);
+    }
+
+    if (coords.length === 0) return;
+    // fitBounds on a zero-area box zooms to maximum, so a lone point is eased
+    // to instead of fitted.
+    if (coords.length === 1) {
+      map.easeTo({ center: coords[0]!, zoom: Math.max(map.getZoom(), 9), duration: 500 });
+      return;
+    }
     let west = coords[0]![0], east = coords[0]![0], south = coords[0]![1], north = coords[0]![1];
     for (const [lng, lat] of coords) {
       west = Math.min(west, lng); east = Math.max(east, lng);
       south = Math.min(south, lat); north = Math.max(north, lat);
     }
+    if (west === east && south === north) {
+      map.easeTo({ center: [west, south], zoom: Math.max(map.getZoom(), 9), duration: 500 });
+      return;
+    }
     map.fitBounds([[west, south], [east, north]], { padding: 48, duration: 500 });
-  }, [props.fitKey, props.routes, props.position, ready]);
+  }, [props.fitKey, props.routes, props.position, props.origin, props.targets, props.fitTo, props.draftTarget, ready]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>
