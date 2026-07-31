@@ -24,7 +24,21 @@ import {
   projectRunway,
   type NeedState,
 } from "./needs.js";
-import { corridorPois, nearestOfCategory, type CorridorPoi, type CorridorPois } from "./pois.js";
+import {
+  anchorPoiPools,
+  corridorPois,
+  nearestOfCategory,
+  type CorridorPoi,
+  type CorridorPois,
+} from "./pois.js";
+import {
+  capChain,
+  flattenPendingAnchors,
+  loadAnchorTree,
+  resolveAnchorChain,
+  type AnchorNode,
+  type ResolvedAnchor,
+} from "./anchors.js";
 import { STICKY_BONUS } from "./scoring.js";
 
 /**
@@ -117,6 +131,18 @@ const PURPOSE_BY_CATEGORY: Record<string, string> = {
 const MAX_STOPS = 6;
 const VERIFY_TOLERANCE = 1.15;
 
+/**
+ * What arriving at an anchor actually is. Previously every waypoint arrival was
+ * labelled "family" regardless of its kind, which mislabelled the stop and gave
+ * it a 120-minute dwell it had not earned.
+ */
+function anchorPurpose(anchor: AnchorNode | null, resolved: ResolvedAnchor | null): string {
+  if (!anchor) return "drive";
+  if (anchor.kind === "family") return "family";
+  if (resolved?.via === "poi") return "sight";
+  return anchor.radiusMiles > 0 ? "drive" : "sight";
+}
+
 export function hourQuantized(nowIso: string): string {
   const d = new Date(nowIso);
   d.setMinutes(0, 0, 0);
@@ -193,9 +219,17 @@ interface BuildContext {
   needStates: NeedState[];
   pool: CorridorPois;
   stickyPoiIds: Set<number>;
-  /** First pending waypoint (today's direction), rest of the chain to the anchor. */
+  /** First resolved anchor (today's direction), rest of the chain to the destination. */
   target: { lat: number; lng: number; name: string; waypointId: number | null };
   chain: LatLng[];
+  /** The full anchor forest, for naming and honesty warnings. */
+  anchorTree: AnchorNode[];
+  /** The leaf-most pending anchors, in routing order. */
+  chainAnchors: AnchorNode[];
+  /** Their resolved pass-through points, index-aligned with chainAnchors. */
+  resolved: ResolvedAnchor[];
+  /** Middle anchors dropped from the projected continuation to bound the OSRM URL. */
+  droppedChainPoints: number;
   remainingBudgetMinutes: number;
 }
 
@@ -205,18 +239,6 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
   const usage = await budgetUsage(db, { ...trip, directDurationMinutes: baseline });
   const needStates = await loadNeedStates(db, trip.id, nowIso);
 
-  const pending = await db
-    .select()
-    .from(waypoints)
-    .where(and(eq(waypoints.tripId, trip.id), eq(waypoints.status, "pending")))
-    .orderBy(asc(waypoints.orderIndex), asc(waypoints.id));
-  const dest = { lat: trip.destLat, lng: trip.destLng };
-  const first = pending[0];
-  const target = first
-    ? { lat: first.lat, lng: first.lng, name: first.name, waypointId: first.id }
-    : { ...dest, name: trip.destName, waypointId: null };
-  const chain: LatLng[] = [...pending.slice(1).map((w) => ({ lat: w.lat, lng: w.lng })), dest];
-
   const serviceCategories = [
     ...new Set([
       "campground",
@@ -225,6 +247,26 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
         .map((s) => s.need.poiCategory!),
     ]),
   ];
+
+  // Anchors: each pending region resolves to the one concrete coordinate the
+  // router needs. Resolution is computed here and never written back — see the
+  // header of engine/anchors.ts for why that matters to ROUTE-5.
+  const anchorTree = await loadAnchorTree(db, trip.id);
+  const chainAnchors = flattenPendingAnchors(anchorTree);
+  const dest = { lat: trip.destLat, lng: trip.destLng };
+  const anchorPools = await anchorPoiPools(db, {
+    tripId: trip.id,
+    anchors: chainAnchors.map((a) => ({ id: a.id, center: a.center, radiusMiles: a.radiusMiles })),
+    serviceCategories,
+  });
+  const resolved = resolveAnchorChain(chainAnchors, position, dest, anchorPools);
+
+  const first = resolved[0];
+  const target = first
+    ? { lat: first.point.lat, lng: first.point.lng, name: first.name, waypointId: first.anchorId }
+    : { ...dest, name: trip.destName, waypointId: null };
+  const capped = capChain(resolved.slice(1));
+  const chain: LatLng[] = [...capped.kept.map((r) => r.point), dest];
   const pool = await corridorPois(db, {
     tripId: trip.id,
     position,
@@ -263,6 +305,10 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
     stickyPoiIds,
     target,
     chain,
+    anchorTree,
+    chainAnchors,
+    resolved,
+    droppedChainPoints: capped.dropped,
     remainingBudgetMinutes: usage.remainingMinutes ?? 0,
   };
 }
@@ -309,19 +355,34 @@ async function buildRole(
   const arrivesToday = skeleton.durationMinutes <= progressMinutes;
 
   // Endpoint: arrival at the target, or a sleep spot near the day's reach.
+  const firstAnchor = ctx.chainAnchors[0] ?? null;
+  const firstResolved = ctx.resolved[0] ?? null;
   let end: StopDraft;
   if (arrivesToday) {
     end = {
-      name: ctx.target.name,
+      // Say which concrete place an area resolved to, and admit when nothing
+      // was known inside it — a bare region name would hide both.
+      name:
+        firstResolved?.via === "poi" && firstResolved.poiName
+          ? `${firstResolved.poiName} (${ctx.target.name})`
+          : firstResolved?.via === "geometric"
+            ? `${ctx.target.name} (nearest point)`
+            : ctx.target.name,
       lat: ctx.target.lat,
       lng: ctx.target.lng,
-      poiId: null,
+      poiId: firstResolved?.poiId ?? null,
       waypointId: ctx.target.waypointId,
       needId: null,
-      purpose: ctx.target.waypointId === null ? "drive" : "family",
+      purpose: anchorPurpose(firstAnchor, firstResolved),
       dwellMinutes: 0,
       score: 0,
     };
+    if (firstResolved?.via === "geometric" && (firstAnchor?.radiusMiles ?? 0) > 0) {
+      warnings.push({
+        severity: "info",
+        message: `No known place inside "${ctx.target.name}" — routing through the nearest point of the area.`,
+      });
+    }
   } else {
     const raw = pointAlongLine(skeleton.geometry, progressMinutes / skeleton.durationMinutes);
     const camp = nearestOfCategory(ctx.pool.byCategory.get("campground") ?? [], raw, 15);
@@ -621,6 +682,10 @@ export async function planStateFingerprint(db: Db, tripId: number): Promise<stri
 
   const state = {
     trip: trip ? { ...trip, createdAt: undefined, updatedAt: undefined } : null,
+    // The spread is load-bearing: every anchor column — radius, parent, depth,
+    // order, pin — must reach the hash so editing an anchor actually replans.
+    // It is also why auto-resolution is never written back to this row; that
+    // would move the fingerprint as a consequence of building and replan forever.
     waypoints: wps.map((w) => ({ ...w, createdAt: undefined })),
     needs: needRows,
     weights: weights.map((w) => ({ category: w.category, weight: w.weight })),

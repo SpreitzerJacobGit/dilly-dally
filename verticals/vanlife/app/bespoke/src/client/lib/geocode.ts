@@ -1,0 +1,79 @@
+/**
+ * Place-name lookup for anchor authoring, via Nominatim.
+ *
+ * Same OSM family as the Overpass place data, and keyless. Its usage policy
+ * asks for an identifying User-Agent and no more than one request a second, so
+ * calls are serialised behind a shared gate rather than fired per keystroke —
+ * the caller is expected to debounce as well. Failures are returned, never
+ * thrown: not finding "the eastern Sierra" should read as an empty list, not a
+ * broken page.
+ */
+
+const ENDPOINT = "https://nominatim.openstreetmap.org/search";
+const MIN_INTERVAL_MS = 1100;
+
+export interface GeocodeHit {
+  name: string;
+  lat: number;
+  lng: number;
+  /** Nominatim's own bbox, used to suggest a sensible starting radius. */
+  suggestedRadiusMiles: number;
+}
+
+let lastCallAt = 0;
+let queue: Promise<unknown> = Promise.resolve();
+
+function throttled<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(async () => {
+    const wait = Math.max(0, lastCallAt + MIN_INTERVAL_MS - Date.now());
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallAt = Date.now();
+    return fn();
+  });
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+interface NominatimRow {
+  display_name: string;
+  lat: string;
+  lon: string;
+  boundingbox?: [string, string, string, string];
+}
+
+/** Half the diagonal of the result's own bbox — a radius that covers what you named. */
+function radiusFromBbox(bbox: NominatimRow["boundingbox"], lat: number): number {
+  if (!bbox) return 25;
+  const [s, n, w, e] = [Number(bbox[0]), Number(bbox[1]), Number(bbox[2]), Number(bbox[3])];
+  const latMiles = (n - s) * 69;
+  const lngMiles = (e - w) * 69 * Math.cos((lat * Math.PI) / 180);
+  const half = Math.hypot(latMiles, lngMiles) / 2;
+  return Math.min(400, Math.max(5, Math.round(half)));
+}
+
+export async function geocode(query: string, limit = 5): Promise<GeocodeHit[]> {
+  const q = query.trim();
+  if (q.length < 3) return [];
+  try {
+    return await throttled(async () => {
+      const url = `${ENDPOINT}?q=${encodeURIComponent(q)}&format=json&limit=${String(limit)}`;
+      const res = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return [];
+      const rows = (await res.json()) as NominatimRow[];
+      return rows.map((r) => {
+        const lat = Number(r.lat);
+        return {
+          name: r.display_name,
+          lat,
+          lng: Number(r.lon),
+          suggestedRadiusMiles: radiusFromBbox(r.boundingbox, lat),
+        };
+      });
+    });
+  } catch {
+    return [];
+  }
+}

@@ -145,6 +145,13 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
   }
 
   const t = trip.data;
+  // Resolution is computed server-side per read, so flatten the tree to look
+  // up what each anchor actually routes through.
+  const anchorById = new Map(
+    (function flat(ns: NonNullable<typeof t>["anchors"]): NonNullable<typeof t>["anchors"] {
+      return ns.flatMap((n) => [n, ...flat(n.children)]);
+    })(t?.anchors ?? []).map((a) => [a.id, a] as const),
+  );
   const budget = t?.usage;
 
   return (
@@ -204,7 +211,11 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
         </div>
       ) : null}
 
-      <h3>Waypoints</h3>
+      <h3>Route anchors</h3>
+      <p style={{ color: "#666", fontSize: ".9rem", marginTop: 0 }}>
+        Regions the route has to pass through. Draw and narrow them on the{" "}
+        <a href="/anchors">Anchors page</a> — this table is the quick view.
+      </p>
       <DataTable
         columns={[
           { key: "order", header: "#", render: (w) => w.orderIndex + 1 },
@@ -244,7 +255,24 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
               </span>
             ),
           },
-          { key: "name", header: "Waypoint", render: (w) => w.name },
+          { key: "name", header: "Anchor", render: (w) => w.name },
+          {
+            key: "radius",
+            header: "Area",
+            render: (w) => (w.radiusMiles > 0 ? `${String(w.radiusMiles)} mi` : "exact"),
+          },
+          {
+            key: "resolved",
+            header: "Routing via",
+            render: (w) => {
+              const a = anchorById.get(w.id);
+              if (!a?.resolved) return w.radiusMiles > 0 ? "narrowed below" : "—";
+              if (a.resolved.via === "poi") return a.resolved.poiName ?? "a place";
+              if (a.resolved.via === "pinned") return "your pinned spot";
+              if (a.resolved.via === "geometric") return "nearest point (no places known)";
+              return "—";
+            },
+          },
           { key: "kind", header: "Kind", render: (w) => w.kind },
           { key: "status", header: "Status", render: (w) => w.status },
           {
@@ -269,7 +297,7 @@ export function TripPage(_props: { user: PageUser }): JSX.Element {
         ]}
         rows={t?.waypoints ?? []}
         rowKey={(w) => w.id}
-        emptyMessage="No waypoints — the plan heads straight for the anchor."
+        emptyMessage="No anchors — the plan heads straight for the destination."
       />
 
       <h3>Corridor places — pin the cool, reject the noise</h3>

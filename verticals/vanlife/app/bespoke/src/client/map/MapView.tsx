@@ -9,7 +9,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle, initMapLibre } from "@elements/shell-map-view/client";
 import { CATEGORY_COLORS, PROJECTED_COLOR, ROLE_COLORS } from "./palette.js";
-import type { CandidateRouteView, MapViewProps } from "./types.js";
+import type { CandidateRouteView, MapAnchorView, MapViewProps } from "./types.js";
 
 /**
  * Imperative MapLibre wrapped in a presentation-only component: props in,
@@ -61,6 +61,40 @@ function poisToGeojson(pois: MapViewProps["pois"]) {
   };
 }
 
+function anchorsToGeojson(anchors: MapAnchorView[], draft: MapAnchorView | null) {
+  const all = [...anchors, ...(draft ? [draft] : [])];
+  return {
+    type: "FeatureCollection" as const,
+    features: all
+      .filter((a) => a.ring && a.ring.length > 3)
+      .map((a) => ({
+        type: "Feature" as const,
+        properties: {
+          id: a.id,
+          name: a.name,
+          depth: a.depth,
+          selected: a.selected,
+          draft: draft !== null && a.id === draft.id,
+          dimmed: a.state !== "pending",
+        },
+        geometry: { type: "Polygon" as const, coordinates: [a.ring!] },
+      })),
+  };
+}
+
+/** Depth reads as nesting: the broad parent recedes, the narrow child asserts. */
+const anchorColorExpr = [
+  "match",
+  ["get", "depth"],
+  0,
+  "#0f766e",
+  1,
+  "#0891b2",
+  2,
+  "#6366f1",
+  "#0f766e",
+] as unknown as string;
+
 const tierColorExpr = [
   "match",
   ["get", "tier"],
@@ -79,6 +113,7 @@ export function MapView(props: MapViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Marker[]>([]);
+  const anchorHandlesRef = useRef<Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [basemapError, setBasemapError] = useState<string | null>(null);
   const propsRef = useRef(props);
@@ -109,9 +144,39 @@ export function MapView(props: MapViewProps): JSX.Element {
     });
 
     map.on("load", () => {
+      map.addSource("anchors", { type: "geojson", data: anchorsToGeojson([], null) });
       map.addSource("projected", { type: "geojson", data: projectedToGeojson([]) });
       map.addSource("routes", { type: "geojson", data: routesToGeojson([], null) });
       map.addSource("pois", { type: "geojson", data: poisToGeojson([]) });
+
+      // Anchors first, so every route line draws on top of the regions.
+      map.addLayer({
+        id: "anchors-fill",
+        type: "fill",
+        source: "anchors",
+        paint: {
+          "fill-color": anchorColorExpr,
+          "fill-opacity": [
+            "case",
+            ["get", "dimmed"],
+            0.04,
+            ["get", "selected"],
+            0.18,
+            0.1,
+          ] as unknown as number,
+        },
+      });
+      map.addLayer({
+        id: "anchors-outline",
+        type: "line",
+        source: "anchors",
+        paint: {
+          "line-color": anchorColorExpr,
+          "line-width": ["case", ["get", "selected"], 2.5, 1.5] as unknown as number,
+          "line-opacity": ["case", ["get", "dimmed"], 0.3, 0.9] as unknown as number,
+          "line-dasharray": ["case", ["get", "draft"], ["literal", [2, 2]], ["literal", [1, 0]]] as unknown as number[],
+        },
+      });
 
       map.addLayer({
         id: "projected-lines",
@@ -168,6 +233,19 @@ export function MapView(props: MapViewProps): JSX.Element {
         if (id !== undefined) propsRef.current.onPoiClick(id);
         e.preventDefault();
       });
+      map.on("click", "anchors-fill", (e: MapLayerMouseEvent) => {
+        // Routes and places sit on top and claim the click first; only an
+        // otherwise-empty part of a region selects the region.
+        if (e.defaultPrevented) return;
+        const id = e.features?.[0]?.properties?.id as number | undefined;
+        if (id !== undefined) propsRef.current.onAnchorClick?.(id);
+        e.preventDefault();
+      });
+      map.on("click", (e: MapLayerMouseEvent) => {
+        if (e.defaultPrevented) return;
+        propsRef.current.onMapClick?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      });
+
       map.on("mouseenter", "routes-hit", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "routes-hit", () => (map.getCanvas().style.cursor = ""));
 
@@ -188,6 +266,7 @@ export function MapView(props: MapViewProps): JSX.Element {
 
     return () => {
       for (const m of markersRef.current) m.remove();
+      for (const m of anchorHandlesRef.current) m.remove();
       map.remove();
       mapRef.current = null;
     };
@@ -202,6 +281,14 @@ export function MapView(props: MapViewProps): JSX.Element {
     );
     (map.getSource("projected") as GeoJSONSource | undefined)?.setData(projectedToGeojson(props.routes));
   }, [props.routes, props.highlightedId, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource("anchors") as GeoJSONSource | undefined)?.setData(
+      anchorsToGeojson(props.anchors ?? [], props.draftAnchor ?? null),
+    );
+  }, [props.anchors, props.draftAnchor, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -242,6 +329,60 @@ export function MapView(props: MapViewProps): JSX.Element {
       );
     }
   }, [props.routes, props.highlightedId, props.position, ready]);
+
+  /**
+   * Drag handles for the selected anchor: one at the centre to move the region,
+   * one on its edge to resize it. The edge handle reports its raw position and
+   * the page turns that into a radius — converting here would mean doing
+   * geometry, which is exactly what this component does not do.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    for (const m of anchorHandlesRef.current) m.remove();
+    anchorHandlesRef.current = [];
+
+    const selected = (props.anchors ?? []).find((a) => a.selected);
+    if (!selected || !props.onAnchorCenterDrag || selected.radiusMiles <= 0) return;
+
+    const centerEl = document.createElement("div");
+    centerEl.className = "vl-anchor-handle vl-anchor-handle-center";
+    centerEl.title = `Drag to move "${selected.name}"`;
+    const centerMarker = new Marker({ element: centerEl, draggable: true })
+      .setLngLat([selected.center.lng, selected.center.lat])
+      .addTo(map);
+    centerMarker.on("drag", () => {
+      const p = centerMarker.getLngLat();
+      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+    });
+    centerMarker.on("dragend", () => {
+      const p = centerMarker.getLngLat();
+      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+    });
+    anchorHandlesRef.current.push(centerMarker);
+
+    // The ring is generated from due north clockwise, so a quarter of the way
+    // round is due east — picked by index, not computed.
+    const ring = selected.ring;
+    if (ring && ring.length > 4 && props.onAnchorRadiusDrag) {
+      const east = ring[Math.floor((ring.length - 1) / 4)]!;
+      const edgeEl = document.createElement("div");
+      edgeEl.className = "vl-anchor-handle vl-anchor-handle-edge";
+      edgeEl.title = "Drag to resize";
+      const edgeMarker = new Marker({ element: edgeEl, draggable: true })
+        .setLngLat(east)
+        .addTo(map);
+      edgeMarker.on("drag", () => {
+        const p = edgeMarker.getLngLat();
+        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+      });
+      edgeMarker.on("dragend", () => {
+        const p = edgeMarker.getLngLat();
+        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+      });
+      anchorHandlesRef.current.push(edgeMarker);
+    }
+  }, [props.anchors, ready]);
 
   // Fit to routes when asked.
   const lastFitKey = useRef("");

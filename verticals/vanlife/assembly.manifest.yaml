@@ -111,7 +111,7 @@ wiring:
 
 bespoke:
   features:
-    - { id: trips, title: Trips & waypoints, requirementsSection: "#trips" }
+    - { id: trips, title: Trips & route anchors, requirementsSection: "#trips" }
     - { id: needs, title: Recurring needs & levels, requirementsSection: "#needs" }
     - { id: checkins, title: Check-ins, requirementsSection: "#checkins" }
     - { id: poi, title: POI aggregation, requirementsSection: "#poi" }
