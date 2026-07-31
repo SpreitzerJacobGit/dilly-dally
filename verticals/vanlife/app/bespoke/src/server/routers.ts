@@ -103,11 +103,6 @@ export const tripsRouter = router({
   get: op.input(z.object({ id: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
     const trip = await tripOr404(db, input.id);
-    const wps = await db
-      .select()
-      .from(waypoints)
-      .where(eq(waypoints.tripId, trip.id))
-      .orderBy(asc(waypoints.orderIndex), asc(waypoints.id));
     const usage = await budgetUsage(db, trip);
     const position = await currentPosition(db, trip);
     const recentProgress = await db
@@ -116,8 +111,10 @@ export const tripsRouter = router({
       .where(eq(progressEvents.tripId, trip.id))
       .orderBy(desc(progressEvents.occurredAt), desc(progressEvents.id))
       .limit(30);
+    // `targets` is the one shape: the flat waypoint rows had a single reader,
+    // the trip table, and that screen is gone.
     const targets = await buildTargetViews(db, trip, position, nowIso());
-    return { ...trip, waypoints: wps, targets, usage, position, recentProgress };
+    return { ...trip, targets, usage, position, recentProgress };
   }),
 
   create: op.input(tripCreateSchema).mutation(

@@ -2,13 +2,11 @@
  * Bespoke client layer for Dilly-Dally: pages and navigation.
  */
 import type { JSX } from "react";
-import { AnchorsPage } from "./pages/AnchorsPage.js";
-import { DashboardPage } from "./pages/DashboardPage.js";
 import { PlannerPage } from "./pages/PlannerPage.js";
 import { NeedsPage } from "./pages/NeedsPage.js";
-import { TripPage } from "./pages/TripPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StatusPage } from "./pages/StatusPage.js";
+import { RedirectHome } from "./pages/RedirectHome.js";
 import { injectInstallMeta } from "./lib/installMeta.js";
 
 export { trpc } from "./trpc.js";
@@ -29,13 +27,12 @@ export interface BespokePage {
 }
 
 export const bespokePages: BespokePage[] = [
-  { path: "/", nav: { label: "Map" }, component: DashboardPage },
-  // Lands nav-hidden so it can be compared against the three screens it
-  // replaces before it takes over "/".
-  { path: "/plan", nav: null, component: PlannerPage },
+  { path: "/", nav: { label: "Plan" }, component: PlannerPage },
   { path: "/needs", nav: { label: "Needs" }, component: NeedsPage },
-  { path: "/anchors", nav: { label: "Anchors" }, component: AnchorsPage },
-  { path: "/trip", nav: { label: "Trip" }, component: TripPage },
   { path: "/settings", nav: { label: "Settings" }, component: SettingsPage },
   { path: "/status", nav: { label: "Status" }, component: StatusPage },
+  // The map, anchors and trip screens became one; their routes still land.
+  { path: "/plan", nav: null, component: RedirectHome },
+  { path: "/anchors", nav: null, component: RedirectHome },
+  { path: "/trip", nav: null, component: RedirectHome },
 ];
