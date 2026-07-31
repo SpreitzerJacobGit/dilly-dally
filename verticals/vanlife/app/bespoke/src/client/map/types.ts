@@ -69,4 +69,14 @@ export interface MapViewProps {
   onAnchorClick?: (id: number) => void;
   /** Fires on any map click the layers did not consume; the page decides if it cares. */
   onMapClick?: (point: { lat: number; lng: number }) => void;
+  /**
+   * Centre handle dragged. Fires continuously with `done: false` for a live
+   * preview, then once with `done: true` to commit.
+   */
+  onAnchorCenterDrag?: (id: number, center: { lat: number; lng: number }, done: boolean) => void;
+  /**
+   * Edge handle dragged, reporting the handle's raw position — the caller
+   * converts that to a radius, so this component stays free of geometry.
+   */
+  onAnchorRadiusDrag?: (id: number, handle: { lat: number; lng: number }, done: boolean) => void;
 }

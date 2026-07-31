@@ -5,9 +5,13 @@ import {
   anchorHorizons,
   buildAnchorTree,
   capChain,
+  depthUpdates,
+  findNode,
   flattenPendingAnchors,
+  isDescendant,
   resolveAnchor,
   resolveAnchorChain,
+  subtreeHeight,
   type AnchorRow,
 } from "../src/server/engine/anchors.js";
 import { haversineMiles, withinDisc } from "../src/server/engine/geo.js";
@@ -224,6 +228,40 @@ describe("capChain", () => {
     const { kept, dropped } = capChain([1, 2, 3, 4, 5, 6, 7, 8], 4);
     expect(kept).toEqual([1, 2, 7, 8]);
     expect(dropped).toBe(4);
+  });
+});
+
+describe("reparenting guards", () => {
+  const tree = buildAnchorTree([
+    row({ id: 1, radiusMiles: 110 }),
+    row({ id: 2, parentId: 1, depth: 1, radiusMiles: 20 }),
+    row({ id: 3, parentId: 2, depth: 2, radiusMiles: 0 }),
+    row({ id: 4, orderIndex: 1, radiusMiles: 50 }),
+  ]);
+
+  it("detects a node's own descendants, which is the cycle guard", () => {
+    // Dropping 1 into 3 would detach the whole branch from the tree.
+    expect(isDescendant(tree, 3, 1)).toBe(true);
+    expect(isDescendant(tree, 1, 1)).toBe(true);
+    expect(isDescendant(tree, 4, 1)).toBe(false);
+    expect(isDescendant(tree, 1, 3)).toBe(false);
+  });
+
+  it("measures subtree height, so a deep branch cannot be nested deeper", () => {
+    expect(subtreeHeight(findNode(tree, 1)!)).toBe(2);
+    expect(subtreeHeight(findNode(tree, 2)!)).toBe(1);
+    expect(subtreeHeight(findNode(tree, 3)!)).toBe(0);
+    // Moving the 2-tall branch under a depth-1 parent would reach depth 3.
+    expect(1 + subtreeHeight(findNode(tree, 1)!)).toBeGreaterThan(2);
+  });
+
+  it("rewrites depth for the whole moved subtree, not just the node", () => {
+    expect(depthUpdates(findNode(tree, 1)!, 1)).toEqual([
+      { id: 1, depth: 1 },
+      { id: 2, depth: 2 },
+      { id: 3, depth: 3 },
+    ]);
+    expect(depthUpdates(findNode(tree, 3)!, 0)).toEqual([{ id: 3, depth: 0 }]);
   });
 });
 

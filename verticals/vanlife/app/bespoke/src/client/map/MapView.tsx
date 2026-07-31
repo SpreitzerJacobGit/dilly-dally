@@ -113,6 +113,7 @@ export function MapView(props: MapViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const markersRef = useRef<Marker[]>([]);
+  const anchorHandlesRef = useRef<Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [basemapError, setBasemapError] = useState<string | null>(null);
   const propsRef = useRef(props);
@@ -265,6 +266,7 @@ export function MapView(props: MapViewProps): JSX.Element {
 
     return () => {
       for (const m of markersRef.current) m.remove();
+      for (const m of anchorHandlesRef.current) m.remove();
       map.remove();
       mapRef.current = null;
     };
@@ -327,6 +329,60 @@ export function MapView(props: MapViewProps): JSX.Element {
       );
     }
   }, [props.routes, props.highlightedId, props.position, ready]);
+
+  /**
+   * Drag handles for the selected anchor: one at the centre to move the region,
+   * one on its edge to resize it. The edge handle reports its raw position and
+   * the page turns that into a radius — converting here would mean doing
+   * geometry, which is exactly what this component does not do.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    for (const m of anchorHandlesRef.current) m.remove();
+    anchorHandlesRef.current = [];
+
+    const selected = (props.anchors ?? []).find((a) => a.selected);
+    if (!selected || !props.onAnchorCenterDrag || selected.radiusMiles <= 0) return;
+
+    const centerEl = document.createElement("div");
+    centerEl.className = "vl-anchor-handle vl-anchor-handle-center";
+    centerEl.title = `Drag to move "${selected.name}"`;
+    const centerMarker = new Marker({ element: centerEl, draggable: true })
+      .setLngLat([selected.center.lng, selected.center.lat])
+      .addTo(map);
+    centerMarker.on("drag", () => {
+      const p = centerMarker.getLngLat();
+      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+    });
+    centerMarker.on("dragend", () => {
+      const p = centerMarker.getLngLat();
+      propsRef.current.onAnchorCenterDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+    });
+    anchorHandlesRef.current.push(centerMarker);
+
+    // The ring is generated from due north clockwise, so a quarter of the way
+    // round is due east — picked by index, not computed.
+    const ring = selected.ring;
+    if (ring && ring.length > 4 && props.onAnchorRadiusDrag) {
+      const east = ring[Math.floor((ring.length - 1) / 4)]!;
+      const edgeEl = document.createElement("div");
+      edgeEl.className = "vl-anchor-handle vl-anchor-handle-edge";
+      edgeEl.title = "Drag to resize";
+      const edgeMarker = new Marker({ element: edgeEl, draggable: true })
+        .setLngLat(east)
+        .addTo(map);
+      edgeMarker.on("drag", () => {
+        const p = edgeMarker.getLngLat();
+        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, false);
+      });
+      edgeMarker.on("dragend", () => {
+        const p = edgeMarker.getLngLat();
+        propsRef.current.onAnchorRadiusDrag?.(selected.id, { lat: p.lat, lng: p.lng }, true);
+      });
+      anchorHandlesRef.current.push(edgeMarker);
+    }
+  }, [props.anchors, ready]);
 
   // Fit to routes when asked.
   const lastFitKey = useRef("");

@@ -118,4 +118,29 @@ export const VL_STYLES = `
 .vl-suggestions li { display: flex; justify-content: space-between; align-items: center;
   gap: 8px; padding: 4px 0; border-bottom: 1px solid #f1f1f1; font-size: .85rem; }
 .vl-suggestions button { font-size: .75rem; padding: 2px 6px; margin-left: 4px; }
+
+/* Drag and drop: the drop indicator has to say which of the two things is
+   about to happen — reorder between, or nest into. */
+.vl-anchor-tree { min-height: 40px; }
+.vl-anchor-row { position: relative; }
+.vl-anchor-row[draggable="true"] { cursor: grab; }
+.vl-anchor-row.vl-anchor-dragging { opacity: .4; cursor: grabbing; }
+.vl-drag-grip { color: #9ca3af; cursor: grab; font-size: .9rem; line-height: 1; user-select: none; }
+.vl-anchor-row.vl-drop-into { outline: 2px solid #0f766e; outline-offset: 1px; background: #f0fdfa; }
+.vl-anchor-row.vl-drop-before::before,
+.vl-anchor-row.vl-drop-after::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 3px;
+  background: #0f766e; border-radius: 2px; }
+.vl-anchor-row.vl-drop-before::before { top: -3px; }
+.vl-anchor-row.vl-drop-after::after { bottom: -3px; }
+.vl-anchor-tree.vl-drop-root { outline: 2px dashed #0f766e; outline-offset: 4px; border-radius: 8px; }
+.vl-drop-hint { color: #94a3b8; font-size: .75rem; margin-top: 6px; }
+
+/* Map handles for the selected anchor. */
+.vl-anchor-handle { border-radius: 50%; border: 2px solid #fff; cursor: grab;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.vl-anchor-handle:active { cursor: grabbing; }
+.vl-anchor-handle-center { width: 16px; height: 16px; background: #0f766e; }
+.vl-anchor-handle-edge { width: 13px; height: 13px; background: #fff; border-color: #0f766e;
+  box-shadow: 0 0 0 3px #0f766e33; }
 `;

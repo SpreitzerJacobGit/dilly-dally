@@ -67,6 +67,13 @@ export const anchorPromoteSchema = z.object({
   name: z.string().min(1).max(120).optional(),
 });
 
+export const anchorReparentSchema = z.object({
+  id: z.number().int(),
+  /** null drops the anchor at the top level. */
+  parentId: z.number().int().nullable(),
+  orderIndex: z.number().int().min(0).max(999).default(0),
+});
+
 export const anchorReorderSchema = z.object({
   tripId: z.number().int(),
   parentId: z.number().int().nullable().default(null),

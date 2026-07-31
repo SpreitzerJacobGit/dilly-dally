@@ -366,6 +366,31 @@ export function subtreeIds(node: AnchorNode): number[] {
   return out;
 }
 
+/** Depth of the deepest node in a subtree, counting the root as 0. */
+export function subtreeHeight(node: AnchorNode): number {
+  return node.children.length === 0
+    ? 0
+    : 1 + Math.max(...node.children.map(subtreeHeight));
+}
+
+/**
+ * New depths for a subtree moved to `newDepth`. Depth is denormalised so the
+ * client can indent without recursive SQL, which means every move has to
+ * rewrite it for the whole subtree, not just the node that moved.
+ */
+export function depthUpdates(node: AnchorNode, newDepth: number): { id: number; depth: number }[] {
+  const out = [{ id: node.id, depth: newDepth }];
+  for (const c of node.children) out.push(...depthUpdates(c, newDepth + 1));
+  return out;
+}
+
+/** Walk up the parent chain — the cycle guard for reparenting. */
+export function isDescendant(tree: AnchorNode[], candidateId: number, ofId: number): boolean {
+  const node = findNode(tree, ofId);
+  if (!node) return false;
+  return subtreeIds(node).includes(candidateId);
+}
+
 export function findNode(tree: AnchorNode[], id: number): AnchorNode | null {
   for (const n of tree) {
     if (n.id === id) return n;

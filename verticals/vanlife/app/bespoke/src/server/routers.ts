@@ -30,6 +30,7 @@ import {
   anchorPinSchema,
   anchorPromoteSchema,
   anchorReorderSchema,
+  anchorReparentSchema,
   anchorUpdateSchema,
   bboxSchema,
   checkInSchema,
@@ -55,11 +56,14 @@ import { anchorPois, anchorPoiPools, corridorPois } from "./engine/pois.js";
 import { circlePolygon, withinDisc } from "./engine/geo.js";
 import {
   anchorHorizons,
+  depthUpdates,
   findNode,
   flattenPendingAnchors,
+  isDescendant,
   loadAnchorTree,
   loadSiblings,
   resolveAnchorChain,
+  subtreeHeight,
   subtreeIds,
 } from "./engine/anchors.js";
 import { osrmRoute, OsrmUnavailableError } from "./engine/osrm.js";
@@ -328,10 +332,17 @@ export const tripsRouter = router({
         if (!parent) rejectIntake("That parent anchor no longer exists.");
         if (parent!.tripId !== input.tripId) rejectIntake("That parent anchor belongs to another trip.");
         if (parent!.depth >= 2) rejectIntake("Anchors nest three levels deep at most.");
-        if (input.radiusMiles >= parent!.radiusMiles && parent!.radiusMiles > 0) {
-          rejectIntake(
-            `A narrower anchor must be smaller than "${parent!.name}" (${String(parent!.radiusMiles)} mi).`,
-          );
+        if (parent!.radiusMiles > 0) {
+          if (input.radiusMiles >= parent!.radiusMiles) {
+            rejectIntake(
+              `A narrower anchor must be smaller than "${parent!.name}" (${String(parent!.radiusMiles)} mi).`,
+            );
+          }
+          // Narrowing means narrowing: a child outside its parent's area would
+          // make the parent's own region meaningless.
+          if (!withinDisc(input.center, { lat: parent!.lat, lng: parent!.lng }, parent!.radiusMiles)) {
+            rejectIntake(`That spot is outside "${parent!.name}".`);
+          }
         }
         depth = parent!.depth + 1;
       }
@@ -407,6 +418,11 @@ export const tripsRouter = router({
       for (const id of [...ids].reverse()) {
         await db.delete(waypoints).where(eq(waypoints.id, id));
       }
+      // Close the gap so the level stays dense, as after a move.
+      const left = await loadSiblings(db, row!.tripId, row!.parentId ?? null);
+      for (const [i, s] of left.entries()) {
+        await db.update(waypoints).set({ orderIndex: i }).where(eq(waypoints.id, s.id));
+      }
       return { removed: ids.length };
     }),
   ),
@@ -420,6 +436,77 @@ export const tripsRouter = router({
           .where(and(eq(waypoints.id, input.orderedIds[i]!), eq(waypoints.tripId, input.tripId)));
       }
       return { tripId: input.tripId };
+    }),
+  ),
+
+  /**
+   * Move an anchor to a new parent and position — the drag-and-drop verb.
+   * Dropping onto an anchor nests (narrows); dropping between siblings
+   * reorders. Every invariant addAnchor enforces is re-checked here, because a
+   * drag can violate all of them at once.
+   */
+  reparentAnchor: op.input(anchorReparentSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
+      if (!row) rejectIntake("Anchor not found");
+      if (input.parentId === input.id) rejectIntake("An anchor cannot be nested inside itself.");
+
+      const tree = await loadAnchorTree(db, row!.tripId);
+      const node = findNode(tree, input.id);
+      if (!node) rejectIntake("Anchor not found");
+
+      let depth = 0;
+      if (input.parentId !== null) {
+        const parent = (await db.select().from(waypoints).where(eq(waypoints.id, input.parentId)))[0];
+        if (!parent) rejectIntake("That parent anchor no longer exists.");
+        if (parent!.tripId !== row!.tripId) rejectIntake("That parent anchor belongs to another trip.");
+        // Dropping a parent into its own descendant would detach the subtree
+        // from the tree entirely.
+        if (isDescendant(tree, input.parentId, input.id)) {
+          rejectIntake("An anchor cannot be nested inside its own narrowing.");
+        }
+        depth = parent!.depth + 1;
+        if (depth + subtreeHeight(node!) > 2) {
+          rejectIntake("That move would nest anchors more than three levels deep.");
+        }
+        if (parent!.radiusMiles > 0) {
+          if (row!.radiusMiles >= parent!.radiusMiles) {
+            rejectIntake(
+              `"${row!.name}" is not smaller than "${parent!.name}" (${String(parent!.radiusMiles)} mi), so it cannot narrow it.`,
+            );
+          }
+          if (!withinDisc({ lat: row!.lat, lng: row!.lng }, { lat: parent!.lat, lng: parent!.lng }, parent!.radiusMiles)) {
+            rejectIntake(`"${row!.name}" sits outside "${parent!.name}".`);
+          }
+        }
+      }
+
+      // Slot into the destination level, then resequence it so orderIndex stays
+      // dense and the drop position is exactly what the operator saw.
+      const siblings = (await loadSiblings(db, row!.tripId, input.parentId)).filter((s) => s.id !== input.id);
+      const at = Math.max(0, Math.min(input.orderIndex, siblings.length));
+      const ordered = [...siblings.slice(0, at).map((s) => s.id), input.id, ...siblings.slice(at).map((s) => s.id)];
+
+      await db
+        .update(waypoints)
+        .set({ parentId: input.parentId })
+        .where(eq(waypoints.id, input.id));
+      for (const u of depthUpdates(node!, depth)) {
+        await db.update(waypoints).set({ depth: u.depth }).where(eq(waypoints.id, u.id));
+      }
+      for (const [i, id] of ordered.entries()) {
+        await db.update(waypoints).set({ orderIndex: i }).where(eq(waypoints.id, id));
+      }
+      // Close the hole the move left behind, so both levels stay dense and the
+      // ↑/↓ buttons keep agreeing with what the list shows.
+      const from = row!.parentId ?? null;
+      if (from !== input.parentId) {
+        const left = (await loadSiblings(db, row!.tripId, from)).filter((s) => s.id !== input.id);
+        for (const [i, s] of left.entries()) {
+          await db.update(waypoints).set({ orderIndex: i }).where(eq(waypoints.id, s.id));
+        }
+      }
+      return { id: input.id, parentId: input.parentId, orderIndex: at };
     }),
   ),
 

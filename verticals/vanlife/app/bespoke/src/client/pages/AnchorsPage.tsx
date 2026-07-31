@@ -5,6 +5,8 @@ import { MapView } from "../map/MapView.js";
 import type { MapAnchorView, MapPoiView } from "../map/types.js";
 import { ringFor } from "../lib/anchorRing.js";
 import { geocode, type GeocodeHit } from "../lib/geocode.js";
+import { haversineMiles } from "../../server/engine/geo.js";
+import { AnchorTree, type AnchorTreeNode, type DropZone } from "../components/AnchorTree.js";
 import { VL_STYLES } from "../styles.js";
 
 /**
@@ -120,6 +122,13 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
   const promoteMut = trpc.trips.promotePoiToAnchor.useMutation({ onSuccess: invalidate, onError: onErr });
   const pinMut = trpc.trips.pinAnchorPoint.useMutation({ onSuccess: invalidate, onError: onErr });
   const markMut = trpc.trips.markWaypoint.useMutation({ onSuccess: invalidate, onError: onErr });
+  const reparentMut = trpc.trips.reparentAnchor.useMutation({
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: onErr,
+  });
   const reorderMut = trpc.trips.reorderAnchors.useMutation({ onSuccess: invalidate, onError: onErr });
 
   // Debounced place-name lookup; geocode() also throttles globally.
@@ -138,6 +147,40 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     return () => clearTimeout(t);
   }, [search]);
 
+  /**
+   * Live geometry while a map handle is being dragged. Held locally and
+   * rendered as the draft ring, so the circle tracks the pointer at frame rate
+   * and only the final position is written.
+   */
+  const [dragging, setDragging] = useState<null | { id: number; center: { lat: number; lng: number }; radiusMiles: number }>(
+    null,
+  );
+
+  const onCenterDrag = (id: number, center: { lat: number; lng: number }, done: boolean): void => {
+    const a = flat.find((x) => x.id === id);
+    if (!a) return;
+    if (!done) {
+      setDragging({ id, center, radiusMiles: a.radiusMiles });
+      return;
+    }
+    setDragging(null);
+    updateMut.mutate({ id, center });
+  };
+
+  const onRadiusDrag = (id: number, handle: { lat: number; lng: number }, done: boolean): void => {
+    const a = flat.find((x) => x.id === id);
+    if (!a) return;
+    // The handle reports a position; the radius is how far it now sits from
+    // the centre. Rounded to whole miles so the committed value is legible.
+    const radiusMiles = Math.max(1, Math.round(haversineMiles(a.center, handle)));
+    if (!done) {
+      setDragging({ id, center: a.center, radiusMiles });
+      return;
+    }
+    setDragging(null);
+    updateMut.mutate({ id, radiusMiles });
+  };
+
   const mapAnchors: MapAnchorView[] = flat.map((a) => ({
     id: a.id,
     name: a.name,
@@ -150,19 +193,32 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     selected: a.id === selectedId,
   }));
 
-  const draftAnchor: MapAnchorView | null = draft
+  // A live drag preview wins over the placement draft — only one can be active.
+  const draftAnchor: MapAnchorView | null = dragging
     ? {
         id: -1,
-        name: draft.name,
-        center: draft.center,
-        radiusMiles: draft.radiusMiles,
-        ring: ringFor(draft.center, draft.radiusMiles),
-        depth: placing?.parentId === null ? 0 : 1,
+        name: flat.find((a) => a.id === dragging.id)?.name ?? "",
+        center: dragging.center,
+        radiusMiles: dragging.radiusMiles,
+        ring: ringFor(dragging.center, dragging.radiusMiles),
+        depth: flat.find((a) => a.id === dragging.id)?.depth ?? 0,
         state: "pending",
         resolved: null,
         selected: true,
       }
-    : null;
+    : draft
+      ? {
+          id: -1,
+          name: draft.name,
+          center: draft.center,
+          radiusMiles: draft.radiusMiles,
+          ring: ringFor(draft.center, draft.radiusMiles),
+          depth: placing?.parentId === null ? 0 : 1,
+          state: "pending",
+          resolved: null,
+          selected: true,
+        }
+      : null;
 
   const suggestionPois: MapPoiView[] = (suggestionsQ.data?.suggestions ?? []).map((p) => ({
     id: p.id,
@@ -205,57 +261,43 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
     reorderMut.mutate({ tripId, parentId: a.parentId, orderedIds: next });
   };
 
-  const renderRow = (a: AnchorNodeView): JSX.Element => (
-    <div key={a.id}>
-      <div
-        className={`vl-anchor-row${a.id === selectedId ? " vl-anchor-selected" : ""}${a.status !== "pending" ? " vl-anchor-dim" : ""}`}
-        style={{ marginLeft: `${String(a.depth * 16)}px` }}
-        onClick={() => {
-          setSelectedId(a.id);
-          setFitKey(`anchor-${String(a.id)}`);
-        }}
-      >
-        <div className="vl-anchor-head">
-          <strong>{a.name}</strong>
-          <span className="vl-chip">{a.radiusMiles > 0 ? `${String(a.radiusMiles)} mi` : "exact"}</span>
-          {a.pacing ? (
-            <span className={`vl-chip${a.pacing.behind ? " vl-chip-warn" : ""}`}>
-              {a.pacing.behind ? `behind — ${a.pacing.etaDate}` : `day ${String(a.pacing.etaDays)}`}
-            </span>
-          ) : null}
-        </div>
-        <div className="vl-anchor-sub">{resolutionLine(a)}</div>
-        <div className="vl-anchor-actions">
-          <button type="button" onClick={(e) => { e.stopPropagation(); move(a, -1); }}>↑</button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); move(a, 1); }}>↓</button>
-          {a.depth < 2 ? (
-            <button type="button" onClick={(e) => { e.stopPropagation(); startPlacing(a.id); }}>
-              Narrow…
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              markMut.mutate({ id: a.id, status: a.status === "pending" ? "skipped" : "pending" });
-            }}
-          >
-            {a.status === "pending" ? "Skip" : "Restore"}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              removeMut.mutate({ id: a.id });
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-      {a.children.map(renderRow)}
-    </div>
-  );
+  /** Map the domain tree onto the presentational tree the DnD control wants. */
+  const toTreeNode = (a: AnchorNodeView): AnchorTreeNode => ({
+    id: a.id,
+    parentId: a.parentId,
+    name: a.name,
+    radiusMiles: a.radiusMiles,
+    depth: a.depth,
+    status: a.status,
+    resolvedLabel: resolutionLine(a),
+    pacingLabel: a.pacing
+      ? a.pacing.behind
+        ? `behind — ${a.pacing.etaDate}`
+        : `day ${String(a.pacing.etaDays)}`
+      : null,
+    behind: a.pacing?.behind ?? false,
+    children: a.children.map(toTreeNode),
+  });
+
+  const siblingsOf = (parentId: number | null): AnchorNodeView[] =>
+    parentId === null ? anchors : (flat.find((n) => n.id === parentId)?.children ?? []);
+
+  const handleDrop = (dragId: number, targetId: number, zone: DropZone): void => {
+    const target = flat.find((a) => a.id === targetId);
+    if (!target || dragId === targetId) return;
+    if (zone === "into") {
+      // Nesting is narrowing: land it at the end of the target's children.
+      reparentMut.mutate({ id: dragId, parentId: targetId, orderIndex: target.children.length });
+      return;
+    }
+    const sibs = siblingsOf(target.parentId).filter((s) => s.id !== dragId);
+    const at = sibs.findIndex((s) => s.id === targetId);
+    reparentMut.mutate({
+      id: dragId,
+      parentId: target.parentId,
+      orderIndex: zone === "before" ? Math.max(0, at) : at + 1,
+    });
+  };
 
   if (tripId === undefined) {
     return (
@@ -283,6 +325,8 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
             onStopClick={() => undefined}
             onPoiClick={() => undefined}
             onAnchorClick={(id) => setSelectedId(id)}
+            onAnchorCenterDrag={onCenterDrag}
+            onAnchorRadiusDrag={onRadiusDrag}
             onMapClick={(point) => {
               if (!placing) return;
               setDraft((d) => ({
@@ -320,7 +364,29 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
           {anchors.length === 0 ? (
             <p style={{ color: "#666" }}>No anchors yet — the route runs straight to the destination.</p>
           ) : (
-            anchors.map(renderRow)
+            <AnchorTree
+              nodes={anchors.map(toTreeNode)}
+              selectedId={selectedId}
+              onSelect={(id) => {
+                setSelectedId(id);
+                setFitKey(`anchor-${String(id)}`);
+              }}
+              onDrop={handleDrop}
+              onDropRoot={(dragId) => reparentMut.mutate({ id: dragId, parentId: null, orderIndex: anchors.length })}
+              onMove={(n, delta) => {
+                const a = flat.find((x) => x.id === n.id);
+                if (a) move(a, delta);
+              }}
+              onNarrow={(id) => startPlacing(id)}
+              onToggleSkip={(n) =>
+                markMut.mutate({ id: n.id, status: n.status === "pending" ? "skipped" : "pending" })
+              }
+              onDelete={(n) => {
+                const kids = flat.find((x) => x.id === n.id)?.children.length ?? 0;
+                if (kids > 0 && !confirm(`Delete "${n.name}" and its ${String(kids)} narrowing(s)?`)) return;
+                removeMut.mutate({ id: n.id });
+              }}
+            />
           )}
 
           {!placing ? (
@@ -406,6 +472,21 @@ export function AnchorsPage(_props: { user: PageUser }): JSX.Element {
           {selected && selected.radiusMiles > 0 ? (
             <div className="vl-anchor-detail">
               <h4>{selected.name}</h4>
+              <p className="vl-drop-hint" style={{ marginTop: 0 }}>
+                Drag the centre dot on the map to move this area, or the edge dot to resize it.
+              </p>
+              <label>
+                Name
+                <input
+                  defaultValue={selected.name}
+                  key={`name-${String(selected.id)}`}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== selected.name) updateMut.mutate({ id: selected.id, name: v });
+                  }}
+                  style={{ width: "100%" }}
+                />
+              </label>
               <label>
                 Radius: <strong>{String(selected.radiusMiles)} mi</strong>
                 <input
