@@ -1,7 +1,13 @@
 # Dilly-Dally — deployment notes (authored)
 
 `Dockerfile` and `compose.yaml` are generated from the assembly manifest — never edit them.
-This file and `prepare-data.ps1` are authored and survive regeneration.
+This file, `prepare-data.ps1`, and the repository-root `.dockerignore` are authored and
+survive regeneration.
+
+The build context is the repository root (`compose.yaml` → `build.context: ../../..`), so
+the root `.dockerignore` is load-bearing: without it every build ships the local scratch
+directory of prepared map data (multiple GB) and `node_modules/` to the daemon. The
+`Dockerfile` runs its own `pnpm install`, so nothing there is needed inside the image.
 
 ## One-time data preparation
 
@@ -34,13 +40,18 @@ Sign in with the seeded operator accounts (see `assembly.manifest.yaml` → `qa.
 Expose through Tailscale on the mini-PC:
 
 ```
-tailscale serve --bg https+insecure://localhost:18081   # or plain `tailscale serve 18081`
+tailscale serve --bg http://localhost:18081
 ```
 
-HTTPS via Tailscale Serve is **load-bearing**, not a nicety: browser geolocation and PWA
-install both require a secure context, and plain `http://<ip>:18081` gets neither. Tailscale
-peer traffic stays on-LAN in the van and MagicDNS resolves locally, so this keeps working
-with no internet uplink.
+The app speaks plain HTTP on 18081, so the target must be `http://`. `https+insecure://`
+tells Tailscale the *backend* is HTTPS and yields a 502 against this app — the `insecure`
+part only waives certificate checking, it does not downgrade the scheme. Tailscale still
+terminates HTTPS on the public side either way.
+
+That public HTTPS is **load-bearing**, not a nicety: browser geolocation and PWA install
+both require a secure context, and plain `http://<ip>:18081` gets neither. Tailscale peer
+traffic stays on-LAN in the van and MagicDNS resolves locally, so this keeps working with
+no internet uplink.
 
 Push notifications: Settings → configure the ntfy topic (treat the topic name as a
 password), then subscribe to the same topic in the ntfy app on both phones.

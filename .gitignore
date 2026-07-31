@@ -4,6 +4,10 @@ dist/
 .env
 .env.*
 !.env.example
-verticals/*/db/*.db
+verticals/*/db/*.db*
 *.local
 .DS_Store
+
+# Local scratch for prepared map/routing inputs — multi-GB, never committed.
+.data-src/
+.tiles/
