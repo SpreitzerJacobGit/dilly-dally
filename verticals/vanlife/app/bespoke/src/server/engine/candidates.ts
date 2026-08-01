@@ -219,8 +219,12 @@ interface BuildContext {
   needStates: NeedState[];
   pool: CorridorPois;
   stickyPoiIds: Set<number>;
-  /** First resolved anchor (today's direction), rest of the chain to the destination. */
-  target: { lat: number; lng: number; name: string; waypointId: number | null };
+  /**
+   * Where today's leg aims: the first resolved anchor, or the destination when
+   * none are pending. Named "steer" rather than "target" because the operator's
+   * Targets are the whole ordered list — this is only the next one.
+   */
+  steer: { lat: number; lng: number; name: string; waypointId: number | null };
   chain: LatLng[];
   /** The full anchor forest, for naming and honesty warnings. */
   anchorTree: AnchorNode[];
@@ -262,7 +266,7 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
   const resolved = resolveAnchorChain(chainAnchors, position, dest, anchorPools);
 
   const first = resolved[0];
-  const target = first
+  const steer = first
     ? { lat: first.point.lat, lng: first.point.lng, name: first.name, waypointId: first.anchorId }
     : { ...dest, name: trip.destName, waypointId: null };
   const capped = capChain(resolved.slice(1));
@@ -303,7 +307,7 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
     needStates,
     pool,
     stickyPoiIds,
-    target,
+    steer,
     chain,
     anchorTree,
     chainAnchors,
@@ -364,14 +368,14 @@ async function buildRole(
       // was known inside it — a bare region name would hide both.
       name:
         firstResolved?.via === "poi" && firstResolved.poiName
-          ? `${firstResolved.poiName} (${ctx.target.name})`
+          ? `${firstResolved.poiName} (${ctx.steer.name})`
           : firstResolved?.via === "geometric"
-            ? `${ctx.target.name} (nearest point)`
-            : ctx.target.name,
-      lat: ctx.target.lat,
-      lng: ctx.target.lng,
+            ? `${ctx.steer.name} (nearest point)`
+            : ctx.steer.name,
+      lat: ctx.steer.lat,
+      lng: ctx.steer.lng,
       poiId: firstResolved?.poiId ?? null,
-      waypointId: ctx.target.waypointId,
+      waypointId: ctx.steer.waypointId,
       needId: null,
       purpose: anchorPurpose(firstAnchor, firstResolved),
       dwellMinutes: 0,
@@ -380,7 +384,7 @@ async function buildRole(
     if (firstResolved?.via === "geometric" && (firstAnchor?.radiusMiles ?? 0) > 0) {
       warnings.push({
         severity: "info",
-        message: `No known place inside "${ctx.target.name}" — routing through the nearest point of the area.`,
+        message: `No known place inside "${ctx.steer.name}" — routing through the nearest point of the area.`,
       });
     }
   } else {
@@ -574,7 +578,7 @@ async function buildRole(
     `${(route.durationMinutes / 60).toFixed(1)}h drive`,
     `${String(Math.round(route.distanceMiles))} mi`,
     `${String(allStops.length)} stops`,
-    arrivesToday ? `arrives at ${ctx.target.name}` : `overnight at ${end.name}`,
+    arrivesToday ? `arrives at ${ctx.steer.name}` : `overnight at ${end.name}`,
     `ends ${String(endsToGo)} mi from ${ctx.trip.destName}`,
   ];
 
@@ -601,7 +605,7 @@ export async function buildDailyCandidates(
 ): Promise<BuiltCandidate[]> {
   const quantized = hourQuantized(nowIso);
   const ctx = await loadContext(db, trip, quantized);
-  const skeleton = await osrmRoute([ctx.position, { lat: ctx.target.lat, lng: ctx.target.lng }], {
+  const skeleton = await osrmRoute([ctx.position, { lat: ctx.steer.lat, lng: ctx.steer.lng }], {
     overview: "full",
   });
 

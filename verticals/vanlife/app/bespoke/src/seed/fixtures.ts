@@ -190,7 +190,7 @@ export function seedIntentSection(): string {
   };
 
   claim(
-    `One active trip exists: "${FIXTURE_TRIP.name}" from ${FIXTURE_TRIP.originName} to ${FIXTURE_TRIP.destName}, with one pending ${String(FIXTURE_ANCHOR.radiusMiles)}-mile area anchor, "${FIXTURE_ANCHOR.name}", that every generated route must pass through; it resolves automatically to the best-scoring place inside it and can be narrowed to a specific one.`,
+    `One active trip exists: "${FIXTURE_TRIP.name}", with Origin ${FIXTURE_TRIP.originName} and final Target ${FIXTURE_TRIP.destName}, plus one pending ${String(FIXTURE_ANCHOR.radiusMiles)}-mile area Target, "${FIXTURE_ANCHOR.name}", that every generated route must pass through; it resolves automatically to the best-scoring place inside it and can be narrowed to a specific one.`,
   );
   claim(`The needs screen lists exactly ${String(FIXTURE_NEEDS.length)} needs.`);
 

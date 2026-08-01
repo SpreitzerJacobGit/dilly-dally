@@ -62,6 +62,34 @@ export const VL_STYLES = `
   border: 3px solid #fff; box-shadow: 0 0 0 4px #2563eb44; animation: vl-pulse 2s infinite; }
 @keyframes vl-pulse { 0% { box-shadow: 0 0 0 4px #2563eb44; } 50% { box-shadow: 0 0 0 10px #2563eb11; } 100% { box-shadow: 0 0 0 4px #2563eb44; } }
 
+/* Where the trip started, as distinct from the pulsing "we are here" pin. */
+.vl-origin-pin { width: 14px; height: 14px; border-radius: 3px; background: #fff;
+  border: 3px solid #1f2937; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+
+/* An exact-point Target draws no ring, so the pin is all there is of it. */
+.vl-target-pin { width: 24px; height: 24px; border-radius: 12px; background: #0f766e; color: #fff;
+  border: 2px solid #fff; font-size: .75rem; font-weight: 700; cursor: pointer; padding: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.vl-target-pin-final { background: #b45309; border-radius: 12px 12px 12px 2px; font-size: .8rem; }
+.vl-target-pin-selected { outline: 3px solid #0ea5e9; outline-offset: 1px; }
+.vl-target-pin-dim { opacity: .45; }
+
+/* Panel tabs: authoring, driving, bookkeeping — one map underneath all three. */
+.vl-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; margin: 8px 0 10px; }
+.vl-tab { flex: 1; background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 8px 4px; font-size: .9rem; font-weight: 600; color: #6b7280; cursor: pointer; }
+.vl-tab-active { color: #0f766e; border-bottom-color: #0f766e; }
+
+.vl-target-ordinal { color: #6b7280; font-variant-numeric: tabular-nums; min-width: 14px; }
+/* The trip's destination: same row shape as a Target, visibly the end of it. */
+.vl-target-final { border-color: #b45309; background: #fffbeb; }
+.vl-target-final .vl-chip-final { background: #b45309; color: #fff; }
+.vl-origin-row { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px;
+  border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 8px; }
+.vl-origin-row strong { flex: 1; }
+.vl-trip-picker { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.vl-trip-picker select { flex: 1; padding: 6px; }
+
 /* A failed basemap must say so rather than render as a silent grey rectangle. */
 /* Sits below the digest banner rather than over it. */
 .vl-basemap-error { position: absolute; top: 56px; left: 50%; transform: translateX(-50%);

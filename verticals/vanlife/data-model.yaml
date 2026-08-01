@@ -7,7 +7,7 @@ entities:
   - id: trips
     table: trips
     title: Trip
-    description: A journey from an origin to an anchor destination, with its frozen budget baseline.
+    description: A journey from an Origin to a final Target, with its frozen budget baseline.
     feature: trips
     layout: { x: 60, y: 60 }
     fields:
@@ -38,7 +38,7 @@ entities:
       - { name: trips_status, fields: [status] }
   - id: waypoints
     table: waypoints
-    title: Waypoint
+    title: Target
     description: A region the route must pass through — center plus radius, nestable to narrow it. Radius 0 is an exact point.
     feature: trips
     layout: { x: 360, y: 60 }
@@ -62,13 +62,13 @@ entities:
         column: parent_id
         type: integer
         references: { entity: waypoints, field: id, onDelete: cascade }
-        description: A narrower anchor inside a broader one; deleting the parent deletes the subtree.
+        description: A narrower Target inside a broader one; deleting the parent deletes the subtree.
       - name: depth
         column: depth
         type: integer
         notNull: true
         default: 0
-        description: Denormalized nesting level 0-2; routing uses the leaf-most pending anchors.
+        description: Denormalized nesting level 0-2; routing uses the leaf-most pending Targets.
       - name: kind
         column: kind
         type: text
@@ -338,7 +338,7 @@ entities:
         type: real
         description: Budget left after this day plus the direct continuation - the honesty figure behind ROUTE-1.
       - { name: geometry, column: geometry, type: text, notNull: true, semantic: json, description: GeoJSON LineString of today's leg. }
-      - { name: projectedGeometry, column: projected_geometry, type: text, semantic: json, description: Gray continuation to the anchor. }
+      - { name: projectedGeometry, column: projected_geometry, type: text, semantic: json, description: Gray continuation to the final Target. }
       - { name: warnings, column: warnings, type: text, semantic: json }
       - name: status
         column: status

@@ -26,18 +26,18 @@ import {
   waypoints,
 } from "../db/schema.js";
 import {
-  anchorAddSchema,
-  anchorPinSchema,
-  anchorPromoteSchema,
-  anchorReorderSchema,
-  anchorReparentSchema,
-  anchorUpdateSchema,
+  targetAddSchema,
+  targetPinSchema,
+  targetPromoteSchema,
+  targetReorderSchema,
+  targetReparentSchema,
+  targetUpdateSchema,
   bboxSchema,
   checkInSchema,
   needConfigureSchema,
   rateSetSchema,
   tripCreateSchema,
-  waypointAddSchema,
+  tripUpdateSchema,
 } from "./schemas.js";
 import { checkInHistory, loadNeedStates } from "./engine/needs.js";
 import {
@@ -52,8 +52,8 @@ import {
   type CandidateWarning,
   type TripRow,
 } from "./engine/candidates.js";
-import { anchorPois, anchorPoiPools, corridorPois } from "./engine/pois.js";
-import { circlePolygon, withinDisc } from "./engine/geo.js";
+import { anchorPois, corridorPois } from "./engine/pois.js";
+import { withinDisc } from "./engine/geo.js";
 import {
   anchorHorizons,
   depthUpdates,
@@ -67,6 +67,8 @@ import {
   subtreeIds,
 } from "./engine/anchors.js";
 import { osrmRoute, OsrmUnavailableError } from "./engine/osrm.js";
+import { applyTripUpdate, deleteTrip, shouldPushWarnings } from "./engine/trips.js";
+import { buildTargetViews } from "./engine/targets.js";
 import {
   composeDigest,
   DIGEST_SETTINGS_KEY,
@@ -91,93 +93,6 @@ async function activeTrip(db: Parameters<typeof loadNeedStates>[0]) {
   return rows[0] ?? null;
 }
 
-export interface AnchorView {
-  id: number;
-  parentId: number | null;
-  name: string;
-  kind: string;
-  center: { lat: number; lng: number };
-  radiusMiles: number;
-  depth: number;
-  orderIndex: number;
-  status: string;
-  arriveBy: string | null;
-  notes: string | null;
-  /** Pre-computed circle so the map never does geometry. Null for exact points. */
-  ring: [number, number][] | null;
-  /** Where the route actually goes through — null when a parent is superseded by its children. */
-  resolved: {
-    point: { lat: number; lng: number };
-    via: string;
-    poiId: number | null;
-    poiName: string | null;
-    detourMinutes: number;
-  } | null;
-  pinned: { lat: number; lng: number } | null;
-  pacing: { etaDays: number; etaDate: string; horizon: string; behind: boolean } | null;
-  children: AnchorView[];
-}
-
-/**
- * The anchor tree with resolution and pacing folded in. Resolution is computed
- * per read and never stored — see engine/anchors.ts.
- */
-async function anchorViewTree(
-  db: Parameters<typeof loadNeedStates>[0],
-  trip: { id: number; destLat: number; destLng: number; dailyDriveHours: number },
-  position: { lat: number; lng: number },
-): Promise<AnchorView[]> {
-  const tree = await loadAnchorTree(db, trip.id);
-  const chainAnchors = flattenPendingAnchors(tree);
-  const dest = { lat: trip.destLat, lng: trip.destLng };
-  const pools = await anchorPoiPools(db, {
-    tripId: trip.id,
-    anchors: chainAnchors.map((a) => ({ id: a.id, center: a.center, radiusMiles: a.radiusMiles })),
-    serviceCategories: [],
-  });
-  const resolved = resolveAnchorChain(chainAnchors, position, dest, pools);
-  const byAnchor = new Map(resolved.map((r) => [r.anchorId, r]));
-  const pacing = new Map(
-    anchorHorizons(resolved, chainAnchors, {
-      start: position,
-      dailyDriveHours: trip.dailyDriveHours,
-      now: nowIso(),
-    }).map((p) => [p.anchorId, p]),
-  );
-
-  const toView = (n: Awaited<ReturnType<typeof loadAnchorTree>>[number]): AnchorView => {
-    const r = byAnchor.get(n.id) ?? null;
-    const p = pacing.get(n.id) ?? null;
-    return {
-      id: n.id,
-      parentId: n.parentId,
-      name: n.name,
-      kind: n.kind,
-      center: n.center,
-      radiusMiles: n.radiusMiles,
-      depth: n.depth,
-      orderIndex: n.orderIndex,
-      status: n.status,
-      arriveBy: n.arriveBy,
-      notes: null,
-      ring: n.radiusMiles > 0 ? circlePolygon(n.center, n.radiusMiles) : null,
-      resolved: r
-        ? {
-            point: r.point,
-            via: r.via,
-            poiId: r.poiId,
-            poiName: r.poiName,
-            detourMinutes: Math.round(r.detourMinutes),
-          }
-        : null,
-      pinned: n.pinned,
-      pacing: p ? { etaDays: p.etaDays, etaDate: p.etaDate, horizon: p.horizon, behind: p.behind } : null,
-      children: n.children.map(toView),
-    };
-  };
-  return tree.map(toView);
-}
-
 export const tripsRouter = router({
   list: op.query(async ({ ctx }) =>
     ctx.dbHandle.db.select().from(trips).orderBy(desc(trips.createdAt)),
@@ -188,11 +103,6 @@ export const tripsRouter = router({
   get: op.input(z.object({ id: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
     const trip = await tripOr404(db, input.id);
-    const wps = await db
-      .select()
-      .from(waypoints)
-      .where(eq(waypoints.tripId, trip.id))
-      .orderBy(asc(waypoints.orderIndex), asc(waypoints.id));
     const usage = await budgetUsage(db, trip);
     const position = await currentPosition(db, trip);
     const recentProgress = await db
@@ -201,8 +111,10 @@ export const tripsRouter = router({
       .where(eq(progressEvents.tripId, trip.id))
       .orderBy(desc(progressEvents.occurredAt), desc(progressEvents.id))
       .limit(30);
-    const anchors = await anchorViewTree(db, trip, position);
-    return { ...trip, waypoints: wps, anchors, usage, position, recentProgress };
+    // `targets` is the one shape: the flat waypoint rows had a single reader,
+    // the trip table, and that screen is gone.
+    const targets = await buildTargetViews(db, trip, position, nowIso());
+    return { ...trip, targets, usage, position, recentProgress };
   }),
 
   create: op.input(tripCreateSchema).mutation(
@@ -244,6 +156,37 @@ export const tripsRouter = router({
     }),
   ),
 
+  /**
+   * Edit the trip's name, Origin, final Target, or pace. Moving an endpoint
+   * resets the frozen baseline; renaming does not — see engine/trips.ts.
+   */
+  update: op.input(tripUpdateSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const trip = await tripOr404(db, input.id);
+      const editsRoute =
+        input.origin !== undefined ||
+        input.dest !== undefined ||
+        input.deviationBudgetRatio !== undefined ||
+        input.dailyDriveHours !== undefined;
+      if (editsRoute && (trip.status === "completed" || trip.status === "archived")) {
+        rejectIntake("A completed trip's route can't be edited — its history is the record.");
+      }
+      return applyTripUpdate(db, input);
+    }),
+  ),
+
+  delete: op.input(z.object({ id: z.number().int() })).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const trip = await tripOr404(db, input.id);
+      if (trip.status === "active") {
+        rejectIntake(
+          "This is the trip the van is on; the morning digest and needs runway follow it. Complete it first.",
+        );
+      }
+      return deleteTrip(db, input.id);
+    }),
+  ),
+
   setStatus: op
     .input(z.object({ id: z.number().int(), status: z.enum(["planning", "active", "completed", "archived"]) }))
     .mutation(
@@ -263,34 +206,7 @@ export const tripsRouter = router({
       }),
     ),
 
-  addWaypoint: op.input(waypointAddSchema).mutation(
-    intakeWrite(async ({ db, input }) => {
-      await tripOr404(db, input.tripId);
-      const maxOrder = await db
-        .select({ orderIndex: waypoints.orderIndex })
-        .from(waypoints)
-        .where(eq(waypoints.tripId, input.tripId))
-        .orderBy(desc(waypoints.orderIndex))
-        .limit(1);
-      const inserted = await db
-        .insert(waypoints)
-        .values({
-          tripId: input.tripId,
-          name: input.name,
-          lat: input.location.lat,
-          lng: input.location.lng,
-          kind: input.kind,
-          poiId: input.poiId ?? null,
-          orderIndex: (maxOrder[0]?.orderIndex ?? -1) + 1,
-          notes: input.notes ?? null,
-          createdAt: nowIso(),
-        })
-        .returning({ id: waypoints.id });
-      return { id: inserted[0]!.id };
-    }),
-  ),
-
-  markWaypoint: op
+  markTarget: op
     .input(z.object({ id: z.number().int(), status: z.enum(["pending", "visited", "skipped"]) }))
     .mutation(
       intakeWrite(async ({ db, input }) => {
@@ -304,26 +220,12 @@ export const tripsRouter = router({
       }),
     ),
 
-  reorderWaypoints: op
-    .input(z.object({ tripId: z.number().int(), orderedIds: z.array(z.number().int()).max(100) }))
-    .mutation(
-      intakeWrite(async ({ db, input }) => {
-        for (let i = 0; i < input.orderedIds.length; i++) {
-          await db
-            .update(waypoints)
-            .set({ orderIndex: i })
-            .where(and(eq(waypoints.id, input.orderedIds[i]!), eq(waypoints.tripId, input.tripId)));
-        }
-        return { tripId: input.tripId };
-      }),
-    ),
-
   /* ── Anchors ─────────────────────────────────────────────────────────────
    * A waypoint with a radius. Narrowing happens by adding a child, so the
    * broad intent survives and deleting the child restores it.
    */
 
-  addAnchor: op.input(anchorAddSchema).mutation(
+  addTarget: op.input(targetAddSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       await tripOr404(db, input.tripId);
       let depth = 0;
@@ -369,7 +271,7 @@ export const tripsRouter = router({
     }),
   ),
 
-  updateAnchor: op.input(anchorUpdateSchema).mutation(
+  updateTarget: op.input(targetUpdateSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
       if (!row) rejectIntake("Anchor not found");
@@ -406,7 +308,7 @@ export const tripsRouter = router({
     }),
   ),
 
-  removeAnchor: op.input(z.object({ id: z.number().int() })).mutation(
+  removeTarget: op.input(z.object({ id: z.number().int() })).mutation(
     intakeWrite(async ({ db, input }) => {
       const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
       if (!row) rejectIntake("Anchor not found");
@@ -427,7 +329,7 @@ export const tripsRouter = router({
     }),
   ),
 
-  reorderAnchors: op.input(anchorReorderSchema).mutation(
+  reorderTargets: op.input(targetReorderSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       for (let i = 0; i < input.orderedIds.length; i++) {
         await db
@@ -442,10 +344,10 @@ export const tripsRouter = router({
   /**
    * Move an anchor to a new parent and position — the drag-and-drop verb.
    * Dropping onto an anchor nests (narrows); dropping between siblings
-   * reorders. Every invariant addAnchor enforces is re-checked here, because a
+   * reorders. Every invariant addTarget enforces is re-checked here, because a
    * drag can violate all of them at once.
    */
-  reparentAnchor: op.input(anchorReparentSchema).mutation(
+  reparentTarget: op.input(targetReparentSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
       if (!row) rejectIntake("Anchor not found");
@@ -510,7 +412,7 @@ export const tripsRouter = router({
     }),
   ),
 
-  pinAnchorPoint: op.input(anchorPinSchema).mutation(
+  pinTargetPoint: op.input(targetPinSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.id)))[0];
       if (!row) rejectIntake("Anchor not found");
@@ -533,7 +435,7 @@ export const tripsRouter = router({
   ),
 
   /** The narrowing verb: a suggested place becomes a child anchor. */
-  promotePoiToAnchor: op.input(anchorPromoteSchema).mutation(
+  promotePoiToTarget: op.input(targetPromoteSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       const parent = (await db.select().from(waypoints).where(eq(waypoints.id, input.parentId)))[0];
       if (!parent) rejectIntake("That anchor no longer exists.");
@@ -572,12 +474,12 @@ export const tripsRouter = router({
     }),
   ),
 
-  anchorSuggestions: op
-    .input(z.object({ anchorId: z.number().int() }))
+  targetSuggestions: op
+    .input(z.object({ targetId: z.number().int() }))
     .query(async ({ ctx, input }) => {
       const db = ctx.dbHandle.db;
-      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.anchorId)))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "anchor not found" });
+      const row = (await db.select().from(waypoints).where(eq(waypoints.id, input.targetId)))[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "target not found" });
       const found = await anchorPois(db, {
         tripId: row.tripId,
         center: { lat: row.lat, lng: row.lng },
@@ -585,7 +487,7 @@ export const tripsRouter = router({
         serviceCategories: [],
       });
       return {
-        anchorId: row.id,
+        targetId: row.id,
         name: row.name,
         radiusMiles: row.radiusMiles,
         bbox: found.bbox,
@@ -656,7 +558,7 @@ async function candidatesWithLegs(db: Parameters<typeof loadNeedStates>[0], trip
 export const planRouter = router({
   today: op.input(z.object({ tripId: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     const date = planDateOf(nowIso());
     let stale = false;
     let message: string | null = null;
@@ -665,7 +567,9 @@ export const planRouter = router({
       try {
         const built = await buildDailyCandidates(db, trip, nowIso());
         await persistCandidates(db, trip.id, date, built);
-        await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+        if (shouldPushWarnings(trip)) {
+          await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+        }
         candidates = await candidatesWithLegs(db, trip.id, date);
       } catch (err) {
         if (!(err instanceof OsrmUnavailableError)) throw err;
@@ -686,7 +590,7 @@ export const planRouter = router({
 
   replan: op.input(z.object({ tripId: z.number().int() })).mutation(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     const date = planDateOf(nowIso());
     // ROUTE-5: with no check-in, selection, position, or other state change
     // since today's build, replan is a read — serve the persisted candidates
@@ -701,7 +605,9 @@ export const planRouter = router({
     try {
       const built = await buildDailyCandidates(db, trip, nowIso());
       await persistCandidates(db, trip.id, date, built);
-      await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+      if (shouldPushWarnings(trip)) {
+        await pushUrgentWarnings(ctx.dbHandle, ctx.logger, trip, built.flatMap((b) => b.warnings), nowIso());
+      }
     } catch (err) {
       if (err instanceof OsrmUnavailableError) {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
@@ -1022,13 +928,13 @@ export const digestRouter = router({
 
   preview: op.input(z.object({ tripId: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     return composeDigest(db, trip, nowIso());
   }),
 
   sendNow: op.input(z.object({ tripId: z.number().int() })).mutation(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
-    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string };
+    const trip = (await tripOr404(db, input.tripId)) as TripRow & { name: string; status: string };
     return generateAndDeliverDigest(ctx.dbHandle, ctx.logger, trip, nowIso(), { forcePush: true });
   }),
 

@@ -1,15 +1,21 @@
 import { useState, type JSX } from "react";
 
 /**
- * Drag-and-drop anchor tree.
+ * Drag-and-drop Target list.
  *
  * Dropping *between* rows reorders; dropping *onto* a row nests, which is the
- * same act as narrowing. Native HTML5 drag and drop — a tree this size does not
+ * same act as narrowing. Native HTML5 drag and drop — a list this size does not
  * justify a dependency, and the native API gives keyboard-free pointer dragging
  * on desktop while the ↑/↓/Narrow buttons remain the accessible path on touch.
+ *
+ * This renders only the editable Targets. The final one is the trip's
+ * destination and is rendered by its own component alongside this, which is
+ * what keeps it pinned to the end of the list: it simply has no drop handlers,
+ * so there is no special case here and no ordering rule to enforce on the
+ * server.
  */
 
-export interface AnchorTreeNode {
+export interface TargetTreeNode {
   id: number;
   parentId: number | null;
   name: string;
@@ -19,24 +25,26 @@ export interface AnchorTreeNode {
   resolvedLabel: string;
   pacingLabel: string | null;
   behind: boolean;
-  children: AnchorTreeNode[];
+  /** Position in the list. Null for a narrowing, which replaces its parent. */
+  ordinal: number | null;
+  children: TargetTreeNode[];
 }
 
 /** Where a drop would land relative to the row under the pointer. */
 export type DropZone = "before" | "into" | "after";
 
-export interface AnchorTreeProps {
-  nodes: AnchorTreeNode[];
+export interface TargetTreeProps {
+  nodes: TargetTreeNode[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   /** Reorder within a level, or nest when `zone` is "into". */
   onDrop: (dragId: number, targetId: number, zone: DropZone) => void;
   /** Drop at the very end of the top level. */
   onDropRoot: (dragId: number) => void;
-  onMove: (node: AnchorTreeNode, delta: number) => void;
+  onMove: (node: TargetTreeNode, delta: number) => void;
   onNarrow: (id: number) => void;
-  onToggleSkip: (node: AnchorTreeNode) => void;
-  onDelete: (node: AnchorTreeNode) => void;
+  onToggleSkip: (node: TargetTreeNode) => void;
+  onDelete: (node: TargetTreeNode) => void;
 }
 
 function zoneFor(e: React.DragEvent, canNest: boolean): DropZone {
@@ -48,7 +56,7 @@ function zoneFor(e: React.DragEvent, canNest: boolean): DropZone {
   return "into";
 }
 
-export function AnchorTree(props: AnchorTreeProps): JSX.Element {
+export function TargetTree(props: TargetTreeProps): JSX.Element {
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<{ id: number; zone: DropZone } | null>(null);
   const [overRoot, setOverRoot] = useState(false);
@@ -62,10 +70,10 @@ export function AnchorTree(props: AnchorTreeProps): JSX.Element {
   /** Dropping a node into its own subtree would detach it; the server rejects
    *  it too, but refusing the drop outright avoids an error the user can see
    *  coming. */
-  const isSelfOrDescendant = (node: AnchorTreeNode, id: number): boolean =>
+  const isSelfOrDescendant = (node: TargetTreeNode, id: number): boolean =>
     node.id === id || node.children.some((c) => isSelfOrDescendant(c, id));
 
-  const renderRow = (n: AnchorTreeNode): JSX.Element => {
+  const renderRow = (n: TargetTreeNode): JSX.Element => {
     const blocked = dragId !== null && isSelfOrDescendant(n, dragId);
     const zone = over?.id === n.id ? over.zone : null;
     return (
@@ -113,6 +121,11 @@ export function AnchorTree(props: AnchorTreeProps): JSX.Element {
             <span className="vl-drag-grip" aria-hidden="true">
               ⠿
             </span>
+            {/* A narrowing is not another place along the way, so it is not
+                numbered — it gets the branch glyph instead. */}
+            <span className="vl-target-ordinal" aria-hidden="true">
+              {n.ordinal === null ? "└" : `${String(n.ordinal)}.`}
+            </span>
             <strong>{n.name}</strong>
             <span className="vl-chip">{n.radiusMiles > 0 ? `${String(n.radiusMiles)} mi` : "exact"}</span>
             {n.pacingLabel ? (
@@ -159,7 +172,7 @@ export function AnchorTree(props: AnchorTreeProps): JSX.Element {
     >
       {props.nodes.map(renderRow)}
       {props.nodes.length > 0 ? (
-        <div className="vl-drop-hint">Drag onto an anchor to narrow it, or between anchors to reorder.</div>
+        <div className="vl-drop-hint">Drag onto a Target to narrow it, or between Targets to reorder.</div>
       ) : null}
     </div>
   );
