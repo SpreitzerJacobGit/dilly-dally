@@ -57,6 +57,18 @@ export interface MapViewProps {
   position: { lat: number; lng: number } | null;
   /** Bump to re-fit the viewport to the routes. */
   fitKey: string;
+  /**
+   * Fit to exactly these [lng, lat] points instead of the routes — an open
+   * place search, say. Plain data: the map still knows nothing about what
+   * they mean, only that this is what should be on screen.
+   */
+  fitCoords?: [number, number][];
+  /**
+   * Zoom below which places stop drawing. The default keeps a catalog of
+   * hundreds from smearing the map when zoomed out; a caller showing a small
+   * deliberate set can lower it so the set is actually visible.
+   */
+  poiMinZoom?: number;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;

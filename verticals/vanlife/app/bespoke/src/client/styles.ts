@@ -54,6 +54,15 @@ export const VL_STYLES = `
   max-height: 80dvh; overflow-y: auto; }
 @media (min-width: 900px) { .vl-modal { border-radius: 12px; } }
 
+.vl-sheet-sorts { display: flex; gap: 6px; margin: 8px 0; }
+.vl-sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border-top: 1px solid #eee; padding: 8px 0; }
+.vl-sheet-row .vl-meta { color: #666; font-size: .8rem; }
+.vl-sheet-row.vl-pinned { background: #f0f9ff; }
+.vl-sheet-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.vl-badge { font-size: .7rem; border-radius: 10px; padding: 1px 6px; border: 1px solid #ccc;
+  color: #555; white-space: nowrap; }
+
 .vl-stop-marker { width: 24px; height: 24px; border-radius: 12px; background: #1f2937; color: #fff;
   border: 2px solid #fff; font-size: .75rem; font-weight: 700; cursor: pointer;
   box-shadow: 0 1px 4px rgba(0,0,0,.4); }

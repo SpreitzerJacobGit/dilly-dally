@@ -84,6 +84,66 @@ export function pointAlongLine(coords: LineCoords, fraction: number): LatLng {
   return { lng: last[0], lat: last[1] };
 }
 
+/** True when `p` is within `maxMiles` of any anchor. No anchors means false. */
+export function withinMilesOfAny(p: LatLng, anchors: LatLng[], maxMiles: number): boolean {
+  return anchors.some((a) => haversineMiles(p, a) <= maxMiles);
+}
+
+/**
+ * Shortest distance from a point to a polyline, in miles. Infinity for a line
+ * with no segments — a caller with no route has no distance to it, and that
+ * must not read as "zero miles away".
+ *
+ * Segments are projected into a local equirectangular plane centred on `p`,
+ * which is exact enough at the corridor scales this is used at and keeps the
+ * helper pure.
+ */
+export function pointToLineMiles(p: LatLng, coords: LineCoords): number {
+  if (coords.length === 0) return Number.POSITIVE_INFINITY;
+  if (coords.length === 1) return haversineMiles(p, { lng: coords[0]![0], lat: coords[0]![1] });
+  const milesPerDegree = (Math.PI * EARTH_RADIUS_MILES) / 180;
+  const cosLat = Math.cos((p.lat * Math.PI) / 180);
+  const x = (lng: number): number => (lng - p.lng) * milesPerDegree * cosLat;
+  const y = (lat: number): number => (lat - p.lat) * milesPerDegree;
+
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]!;
+    const b = coords[i]!;
+    const ax = x(a[0]);
+    const ay = y(a[1]);
+    const bx = x(b[0]);
+    const by = y(b[1]);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    const t = lenSq === 0 ? 0 : Math.min(1, Math.max(0, -(ax * dx + ay * dy) / lenSq));
+    const closest = { lng: a[0] + (b[0] - a[0]) * t, lat: a[1] + (b[1] - a[1]) * t };
+    const miles = haversineMiles(p, closest);
+    if (miles < best) best = miles;
+  }
+  return best;
+}
+
+/** Bounding box [south, west, north, east] holding every point, padded by `padMiles`. */
+export function bboxAround(points: LatLng[], padMiles: number): [number, number, number, number] {
+  if (points.length === 0) return [-90, -180, 90, 180];
+  let south = points[0]!.lat;
+  let north = points[0]!.lat;
+  let west = points[0]!.lng;
+  let east = points[0]!.lng;
+  for (const p of points) {
+    south = Math.min(south, p.lat);
+    north = Math.max(north, p.lat);
+    west = Math.min(west, p.lng);
+    east = Math.max(east, p.lng);
+  }
+  const midLat = (south + north) / 2;
+  const latPad = padMiles / 69;
+  const lngPad = padMiles / (69 * Math.max(0.2, Math.cos((midLat * Math.PI) / 180)));
+  return [south - latPad, west - lngPad, north + latPad, east + lngPad];
+}
+
 /**
  * Estimated extra driving minutes to visit `p` between `prev` and `next`,
  * from great-circle distance with a road-shape factor. Used only to RANK

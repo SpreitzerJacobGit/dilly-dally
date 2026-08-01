@@ -35,6 +35,7 @@ import {
   bboxSchema,
   checkInSchema,
   needConfigureSchema,
+  needOptionsSchema,
   rateSetSchema,
   tripCreateSchema,
   waypointAddSchema,
@@ -53,6 +54,7 @@ import {
   type TripRow,
 } from "./engine/candidates.js";
 import { anchorPois, anchorPoiPools, corridorPois } from "./engine/pois.js";
+import { needFacilityOptions } from "./engine/needSearch.js";
 import { circlePolygon, withinDisc } from "./engine/geo.js";
 import {
   anchorHorizons,
@@ -817,6 +819,26 @@ export const planRouter = router({
       pois: [...all.values()].sort((a, b) => b.score - a.score || a.id - b.id).slice(0, 300),
       marks,
     };
+  }),
+
+  /**
+   * The places that can service one need, measured against today's route.
+   * Read-only and answered from the local catalog, so it survives a dead
+   * uplink; the router matrix only sharpens the added-time figures.
+   */
+  needOptions: op.input(needOptionsSchema).query(async ({ ctx, input }) => {
+    const db = ctx.dbHandle.db;
+    const trip = (await tripOr404(db, input.tripId)) as TripRow;
+    const need = (await db.select().from(needs).where(eq(needs.id, input.needId)))[0];
+    if (!need) throw new TRPCError({ code: "NOT_FOUND", message: "No such need" });
+    return needFacilityOptions(db, {
+      trip,
+      needId: input.needId,
+      nowIso: nowIso(),
+      candidateId: input.candidateId,
+      radiusMiles: input.radiusMiles,
+      limit: input.limit,
+    });
   }),
 
   markPoi: op

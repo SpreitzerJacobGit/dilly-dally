@@ -390,7 +390,11 @@ export function MapView(props: MapViewProps): JSX.Element {
     const map = mapRef.current;
     if (!map || !ready || props.fitKey === lastFitKey.current) return;
     lastFitKey.current = props.fitKey;
-    const coords = props.routes.flatMap((r) => [...r.coordinates, ...(r.projected ?? [])]);
+    // A caller with explicit fit points wants those on screen, not the routes.
+    const coords =
+      props.fitCoords && props.fitCoords.length > 0
+        ? [...props.fitCoords]
+        : props.routes.flatMap((r) => [...r.coordinates, ...(r.projected ?? [])]);
     if (props.position) coords.push([props.position.lng, props.position.lat]);
     if (coords.length < 2) return;
     let west = coords[0]![0], east = coords[0]![0], south = coords[0]![1], north = coords[0]![1];
@@ -399,7 +403,16 @@ export function MapView(props: MapViewProps): JSX.Element {
       south = Math.min(south, lat); north = Math.max(north, lat);
     }
     map.fitBounds([[west, south], [east, north]], { padding: 48, duration: 500 });
-  }, [props.fitKey, props.routes, props.position, ready]);
+  }, [props.fitKey, props.routes, props.position, props.fitCoords, ready]);
+
+  // A small deliberate set of places must not vanish under the catalog's
+  // zoom floor — showing nothing would read as "there is nothing here".
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!map.getLayer("pois-dots")) return;
+    map.setLayerZoomRange("pois-dots", props.poiMinZoom ?? 7, 24);
+  }, [props.poiMinZoom, ready]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>

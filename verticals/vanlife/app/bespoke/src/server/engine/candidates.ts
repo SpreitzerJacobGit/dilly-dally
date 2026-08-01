@@ -16,7 +16,13 @@ import {
   trips,
   waypoints,
 } from "../../db/schema.js";
-import { detourEstimateMinutes, haversineMiles, pointAlongLine, type LatLng } from "./geo.js";
+import {
+  detourEstimateMinutes,
+  haversineMiles,
+  pointAlongLine,
+  withinMilesOfAny,
+  type LatLng,
+} from "./geo.js";
 import { osrmRoute, type OsrmRoute } from "./osrm.js";
 import {
   deadlineMilesAlongRoute,
@@ -28,6 +34,7 @@ import {
   anchorPoiPools,
   corridorPois,
   nearestOfCategory,
+  sightAffinity,
   type CorridorPoi,
   type CorridorPois,
 } from "./pois.js";
@@ -39,7 +46,12 @@ import {
   type AnchorNode,
   type ResolvedAnchor,
 } from "./anchors.js";
-import { STICKY_BONUS } from "./scoring.js";
+import {
+  CLUSTER_BONUS,
+  CLUSTER_RADIUS_MILES,
+  CLUSTER_TIE_MINUTES,
+  STICKY_BONUS,
+} from "./scoring.js";
 
 /**
  * The tour engine: 3–5 day-leg candidates per day, from most-direct to
@@ -230,6 +242,8 @@ interface BuildContext {
   resolved: ResolvedAnchor[];
   /** Middle anchors dropped from the projected continuation to bound the OSRM URL. */
   droppedChainPoints: number;
+  /** Per service place, how much sightseeing sits within CLUSTER_RADIUS_MILES. */
+  clusterAffinity: Map<number, number>;
   remainingBudgetMinutes: number;
 }
 
@@ -295,6 +309,20 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
     }
   }
 
+  // Route-through-needs: how much sightseeing sits beside each service place,
+  // computed once and shared by every role. Both pools are already sorted, so
+  // this is a pure function of the corridor (ROUTE-5).
+  const clusterAffinity = new Map<number, number>();
+  for (const [, list] of pool.byCategory) {
+    for (const p of list) {
+      if (clusterAffinity.has(p.id)) continue;
+      clusterAffinity.set(
+        p.id,
+        sightAffinity({ lat: p.lat, lng: p.lng }, pool.sideQuests, CLUSTER_RADIUS_MILES),
+      );
+    }
+  }
+
   return {
     db,
     trip,
@@ -309,6 +337,7 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
     chainAnchors,
     resolved,
     droppedChainPoints: capped.dropped,
+    clusterAffinity,
     remainingBudgetMinutes: usage.remainingMinutes ?? 0,
   };
 }
@@ -436,25 +465,45 @@ async function buildRole(
       state.deadlineAt !== null && Date.parse(state.deadlineAt) < Date.parse(ctx.nowIso) + 36 * 3_600_000;
     if (!crossesToday && !urgentSoon) continue;
 
+    // Route-through-needs, direction 1: among the places that service this
+    // need at near-equal cost, prefer the one with the most sightseeing next
+    // door. Feasibility is still decided by the cheapest place in the whole
+    // pool, and the near-tie band is clamped to the cap — so this can never
+    // drop a service stop or spend a minute more than before (ROUTE-2).
     const pool = ctx.pool.byCategory.get(need.poiCategory) ?? [];
-    let bestStop: { poi: CorridorPoi; index: number; detourMinutes: number } | null = null;
-    for (const poi of pool) {
+    const options = pool.map((poi) => {
       const ins = bestInsertion(stops, ctx.position, endPoint, { lat: poi.lat, lng: poi.lng });
-      if (!bestStop || ins.detourMinutes < bestStop.detourMinutes) {
-        bestStop = { poi, index: ins.index, detourMinutes: ins.detourMinutes };
-      }
-    }
-    if (!bestStop || bestStop.detourMinutes > needDetourCap) {
+      return { poi, index: ins.index, detourMinutes: ins.detourMinutes };
+    });
+    const minDetour = options.reduce(
+      (m, o) => Math.min(m, o.detourMinutes),
+      Number.POSITIVE_INFINITY,
+    );
+    if (options.length === 0 || minDetour > needDetourCap) {
       warnings.push({
         severity: urgentSoon || state.urgency === "urgent" ? "urgent" : "info",
         needKey: need.key,
         message:
           pool.length === 0
             ? `No known ${need.poiCategory} stop in the corridor can service "${need.title}".`
-            : `No ${need.poiCategory} stop is reachable within today's plan for "${need.title}" (closest adds ${String(Math.round(bestStop?.detourMinutes ?? 0))} min).`,
+            : `No ${need.poiCategory} stop is reachable within today's plan for "${need.title}" (closest adds ${String(Math.round(minDetour))} min).`,
       });
       continue;
     }
+    const band = Math.min(CLUSTER_TIE_MINUTES, needDetourCap - minDetour);
+    const affinityOf = (poi: CorridorPoi): number => ctx.clusterAffinity.get(poi.id) ?? 0;
+    let bestStop: { poi: CorridorPoi; index: number; detourMinutes: number } | null = null;
+    for (const o of options) {
+      if (o.detourMinutes > minDetour + band) continue;
+      if (
+        !bestStop ||
+        affinityOf(o.poi) > affinityOf(bestStop.poi) ||
+        (affinityOf(o.poi) === affinityOf(bestStop.poi) && o.detourMinutes < bestStop.detourMinutes)
+      ) {
+        bestStop = o;
+      }
+    }
+    if (!bestStop) continue;
     const purpose = PURPOSE_BY_CATEGORY[need.poiCategory] ?? "resupply";
     stops.splice(bestStop.index, 0, {
       name: bestStop.poi.name,
@@ -468,6 +517,14 @@ async function buildRole(
       score: 0,
     });
   }
+
+  // Route-through-needs, direction 2: the stops we are already committed to
+  // making. A sight beside one of them is the same errand — including beside
+  // tonight's campground, since that is where the evening is spent anyway.
+  const clusterAnchors: LatLng[] = [
+    ...stops.filter((s) => s.needId !== null).map((s) => ({ lat: s.lat, lng: s.lng })),
+    ...(end.poiId !== null && end.purpose === "camp" ? [endPoint] : []),
+  ];
 
   // Side-quest greedy fill, by value density inside the role's detour budget.
   let detourBudget = role.detourFraction * dayMinutes;
@@ -487,7 +544,17 @@ async function buildRole(
       const cost = ins.detourMinutes + dwell;
       if (ins.detourMinutes > detourBudget) continue;
       const sticky = ctx.stickyPoiIds.has(poi.id) ? STICKY_BONUS : 1;
-      const value = poi.pinned ? Number.POSITIVE_INFINITY : (poi.score * sticky) / Math.max(cost, 5);
+      // Reorders preference inside the detour budget; never enlarges it.
+      const cluster = withinMilesOfAny(
+        { lat: poi.lat, lng: poi.lng },
+        clusterAnchors,
+        CLUSTER_RADIUS_MILES,
+      )
+        ? CLUSTER_BONUS
+        : 1;
+      const value = poi.pinned
+        ? Number.POSITIVE_INFINITY
+        : (poi.score * sticky * cluster) / Math.max(cost, 5);
       if (!best || value > best.value || (value === best.value && poi.id < best.poi.id)) {
         best = { poi, index: ins.index, cost, value };
       }
@@ -629,6 +696,14 @@ export async function buildDailyCandidates(
 
 const PlanFingerprintSchema = z.object({ hash: z.string() });
 
+/**
+ * Bump by hand whenever a change to this engine should reach plans that were
+ * already built. It is an input to the plan-state fingerprint, so bumping it
+ * makes the next replan rebuild once instead of serving the older engine's
+ * work forever.
+ */
+const ENGINE_REVISION = "2026-07-31-cluster";
+
 const fingerprintKey = (tripId: number, planDate: string): string =>
   `plan-fingerprint:${String(tripId)}:${planDate}`;
 
@@ -681,6 +756,11 @@ export async function planStateFingerprint(db: Db, tripId: number): Promise<stri
   const poiCount = (await db.select({ n: count() }).from(pois))[0];
 
   const state = {
+    // The fingerprint hashes state, not code — so a deployed engine change
+    // would otherwise keep serving the plan built by the previous engine until
+    // some unrelated row moved. Bumping this by hand replans exactly once. A
+    // constant is still constant, so ROUTE-5 determinism is untouched.
+    engine: ENGINE_REVISION,
     trip: trip ? { ...trip, createdAt: undefined, updatedAt: undefined } : null,
     // The spread is load-bearing: every anchor column — radius, parent, depth,
     // order, pin — must reach the hash so editing an anchor actually replans.

@@ -58,3 +58,25 @@ export function byScoreThenId<T extends { score: number; id: number }>(a: T, b: 
 
 /** Yesterday's selected-but-unvisited stops evolve into today's plan. */
 export const STICKY_BONUS = 1.5;
+
+/**
+ * Route-through-needs: a place beside a stop we are already making is the same
+ * errand, not a second detour. At the engine's own road factor and speed a 10
+ * mile lateral offset is at most ~35 minutes round trip, so the bonus can only
+ * ever fire on places that are plausibly one stop.
+ */
+export const CLUSTER_RADIUS_MILES = 10;
+
+/**
+ * Value multiplier for a side-quest that shares a stop with a serviced need.
+ * Deliberately below STICKY_BONUS: yesterday's continuity still outranks a
+ * fresh cluster, so plans keep evolving rather than reshuffling.
+ */
+export const CLUSTER_BONUS = 1.35;
+
+/**
+ * Two places servicing the same need whose detours differ by less than this
+ * are a tie; nearby sights break it. A tie-break, never a preference — the
+ * band is clamped so the detour cap still binds.
+ */
+export const CLUSTER_TIE_MINUTES = 8;

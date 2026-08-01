@@ -27,6 +27,8 @@ Every recurring need is tracked as an estimated level with a capacity, a consump
 `[NEED-3]` A need projected to run dry or overflow before its next planned service stop is flagged as urgent everywhere it appears.
 `[NEED-4]` Editing a need's capacity, rate, or threshold immediately changes every projection; the application may suggest a refined rate derived from check-in history, and a suggestion never applies itself — an operator must accept it.
 `[NEED-5]` Work internet appears as a tracked concern on the needs screen but never generates route stops — it is a checklist item, not a routing driver.
+`[NEED-6]` Tapping a tracked need that drives routing lists the places that can service it, each showing how far it is from the current position and how many minutes it would add to today's chosen route, orderable by either measure; the list is drawn from places already stored on the van server, so it works with no internet.
+`[NEED-7]` Adding a place from that list pins it for the trip and regenerates the day's candidates so it appears as a stop wherever it is feasible; a place already pinned is shown as pinned and can be released from the same row.
 
 ## Check-ins {#checkins}
 
@@ -58,6 +60,7 @@ Each day the application proposes candidate routes across a spectrum of ambition
 `[ROUTE-5]` Regenerating the day's candidates without any new check-in, selection, or position change returns the same candidates — plans do not reshuffle on their own.
 `[ROUTE-6]` Marking a stop of the selected route as visited records progress; candidates generated afterwards start from the recorded position.
 `[ROUTE-7]` When route computation is unavailable, the dashboard still shows the last generated plan clearly marked as stale, with a visible message — never a blank screen or a silent failure.
+`[ROUTE-8]` Candidates prefer stops that share a trip: a place worth stopping for that sits beside a planned service stop is chosen over an equally good one far from it, and where two places servicing the same need cost nearly the same detour, the one nearest the day's best sights wins — never at the cost of dropping a service stop a need requires, exceeding the deviation budget, or changing the plan when nothing else changed.
 
 ## Map dashboard {#map}
 
@@ -90,6 +93,7 @@ The van server is the source of truth; the internet is optional.
 
 `[OFF-1]` With no internet connection, the dashboard still shows the current plan, need levels, and map, and plans can still be regenerated — only place refreshing and push delivery degrade, each reporting its state honestly.
 `[OFF-2]` The map never fetches base imagery from a third-party service at runtime — an installation with no internet renders the same map as one with it.
+`[OFF-3]` When route computation is unavailable, the places that can service a need are still listed and ranked by distance, and the added-time figures say plainly that they are estimates rather than routed drive times.
 
 ## First-run experience
 

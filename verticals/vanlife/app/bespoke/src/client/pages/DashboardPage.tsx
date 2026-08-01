@@ -6,6 +6,7 @@ import type { CandidateRouteView, MapPoiView } from "../map/types.js";
 import { ROLE_LABELS, roleColor, PROJECTED_COLOR } from "../map/palette.js";
 import { CandidateCard, type CandidateDetail } from "../components/CandidateList.js";
 import { NeedsStrip, type NeedStateView } from "../components/NeedsStrip.js";
+import { NeedSearchSheet } from "../components/NeedSearchSheet.js";
 import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
 import { DigestBanner, type DigestView } from "../components/DigestBanner.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
@@ -34,6 +35,11 @@ export function DashboardPage(_props: { user: PageUser }): JSX.Element {
   const [viewport, setViewport] = useState<{ bbox: Bbox; zoom: number } | null>(null);
   const [poiDetailId, setPoiDetailId] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Route-through-needs: the need whose stop search is open, the places it
+  // found (so the map can show them), and the row whose pin is in flight.
+  const [needSearch, setNeedSearch] = useState<NeedStateView | null>(null);
+  const [sheetPois, setSheetPois] = useState<MapPoiView[]>([]);
+  const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
 
   const activeTrip = trpc.trips.active.useQuery();
   const tripId = activeTrip.data?.id;
@@ -128,16 +134,48 @@ export function DashboardPage(_props: { user: PageUser }): JSX.Element {
   }, [candidates, highlightedId]);
 
   const mapRoutes: CandidateRouteView[] = candidates;
-  const mapPois: MapPoiView[] = (poisQ.data ?? []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    category: p.category,
-    lat: p.lat,
-    lng: p.lng,
-  }));
+  // While a need's stop search is open the map shows exactly those places —
+  // the catalog underneath would bury a twenty-place answer.
+  const mapPois: MapPoiView[] =
+    needSearch !== null
+      ? sheetPois
+      : (poisQ.data ?? []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          category: p.category,
+          lat: p.lat,
+          lng: p.lng,
+        }));
   const needStates = (needsQ.data ?? []) as NeedStateView[];
   const digest = (digestQ.data ?? null) as DigestView | null;
-  const fitKey = `${String(tripId)}-${plan.data?.date ?? ""}-${String(candidates.length)}`;
+  const searchFit = `${needSearch === null ? "" : `need${String(needSearch.need.id)}:${String(sheetPois.length)}`}`;
+  const fitKey = `${String(tripId)}-${plan.data?.date ?? ""}-${String(candidates.length)}-${searchFit}`;
+  const fitCoords: [number, number][] | undefined =
+    needSearch !== null && sheetPois.length > 0
+      ? sheetPois.map((p) => [p.lng, p.lat] as [number, number])
+      : undefined;
+
+  /**
+   * Pin the place for the trip, then replan so it lands in today's candidates.
+   * Not queued when offline: check-ins are the one write this app stores for
+   * later — everything else fails visibly.
+   */
+  function setPin(poiId: number, mark: "pinned" | null): void {
+    if (tripId === undefined) return;
+    setPendingPoiId(poiId);
+    markPoi.mutate(
+      { tripId, poiId, mark },
+      {
+        onSuccess: () => {
+          void utils.plan.needOptions.invalidate();
+          setToast(mark === null ? "Un-pinned — replanning…" : "Pinned — replanning…");
+          replan.mutate({ tripId });
+        },
+        onError: (e) => setToast(`Couldn't save: ${e.message}`),
+        onSettled: () => setPendingPoiId(null),
+      },
+    );
+  }
 
   const offline = plan.isError || needsQ.isError;
 
@@ -194,6 +232,8 @@ export function DashboardPage(_props: { user: PageUser }): JSX.Element {
                 : null
             }
             fitKey={fitKey}
+            fitCoords={fitCoords}
+            poiMinZoom={needSearch !== null ? 0 : 7}
             onSelectRoute={setHighlightedId}
             onStopClick={(_routeId, orderIndex) => {
               const c = candidates.find((x) => x.id === highlightedId);
@@ -259,7 +299,7 @@ export function DashboardPage(_props: { user: PageUser }): JSX.Element {
               Route computation unavailable — showing the last generated plan (stale).
             </div>
           ) : null}
-          <NeedsStrip states={needStates} />
+          <NeedsStrip states={needStates} onNeedSearch={setNeedSearch} />
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <h3 style={{ margin: "8px 0" }}>Today's candidates</h3>
             <button
@@ -287,6 +327,22 @@ export function DashboardPage(_props: { user: PageUser }): JSX.Element {
           <CheckInBar states={needStates} onCheckIn={handleCheckIn} compact />
         </div>
       </div>
+      {needSearch !== null && tripId !== undefined ? (
+        <NeedSearchSheet
+          tripId={tripId}
+          need={needSearch.need}
+          candidateId={highlightedId}
+          pendingPoiId={pendingPoiId}
+          onPin={(poiId) => setPin(poiId, "pinned")}
+          onUnpin={(poiId) => setPin(poiId, null)}
+          onShowDetails={setPoiDetailId}
+          onOptionsChange={setSheetPois}
+          onClose={() => {
+            setNeedSearch(null);
+            setSheetPois([]);
+          }}
+        />
+      ) : null}
       {toast ? <div className="vl-toast">{toast}</div> : null}
     </div>
   );
