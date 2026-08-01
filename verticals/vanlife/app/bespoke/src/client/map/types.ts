@@ -90,6 +90,13 @@ export interface MapViewProps {
    * Target passes its own ring so the fit does not zoom back out to the trip.
    */
   fitTo?: [number, number][] | null;
+  /**
+   * Zoom below which places stop drawing. The default keeps a catalog of
+   * hundreds from smearing the map when zoomed out; a caller showing a small
+   * deliberate set — an open place search, say — can lower it so the set is
+   * actually visible.
+   */
+  poiMinZoom?: number;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;

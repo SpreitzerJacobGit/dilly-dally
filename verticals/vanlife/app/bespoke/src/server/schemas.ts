@@ -114,6 +114,20 @@ export const rateSetSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
+/**
+ * Route-through-needs: the places that can service one need, ranked against
+ * today's chosen route. Read-only, and answered entirely from places already
+ * stored on the van server.
+ */
+export const needOptionsSchema = z.object({
+  tripId: z.number().int(),
+  needId: z.number().int(),
+  /** Rank "on the way" against this candidate; defaults to the day's selection. */
+  candidateId: z.number().int().optional(),
+  radiusMiles: z.number().min(5).max(200).default(60),
+  limit: z.number().int().min(1).max(50).default(20),
+});
+
 export const bboxSchema = z.object({
   south: z.number().min(-90).max(90),
   west: z.number().min(-180).max(180),

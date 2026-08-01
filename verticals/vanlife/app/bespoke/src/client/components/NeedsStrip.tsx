@@ -9,6 +9,8 @@ export interface NeedStateView {
     unit: string;
     capacity: number;
     routingDriver: boolean;
+    /** Which place category services this need; null for checklist-only concerns. */
+    poiCategory: string | null;
   };
   level: number;
   runway: number;
@@ -52,13 +54,30 @@ export function byUrgencyThenDeadline(a: NeedStateView, b: NeedStateView): numbe
   return rank(a) - rank(b) || deadline(a) - deadline(b) || a.need.id - b.need.id;
 }
 
-export function NeedsStrip(props: { states: NeedStateView[] }): JSX.Element {
+/** A need that drives routing and has a place category can be searched for. */
+export function canSearchStops(s: NeedStateView): boolean {
+  return s.need.routingDriver && s.need.poiCategory !== null;
+}
+
+export function NeedsStrip(props: {
+  states: NeedStateView[];
+  /** Given, a routing need opens the stop search instead of the needs screen. */
+  onNeedSearch?: (state: NeedStateView) => void;
+}): JSX.Element {
   const navigate = useNavigate();
   const sorted = [...props.states].sort(byUrgencyThenDeadline);
   return (
     <div className="vl-needs-strip">
       {sorted.map((s) => (
-        <NeedGauge key={s.need.id} state={s} onClick={() => void navigate("/needs")} />
+        <NeedGauge
+          key={s.need.id}
+          state={s}
+          onClick={() =>
+            props.onNeedSearch && canSearchStops(s)
+              ? props.onNeedSearch(s)
+              : void navigate("/needs")
+          }
+        />
       ))}
     </div>
   );

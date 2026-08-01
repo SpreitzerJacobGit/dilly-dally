@@ -325,6 +325,24 @@ export function nearestOfCategory(
 }
 
 /**
+ * How much sightseeing sits next door to a point: the summed score of every
+ * side-quest within `radiusMiles`. Summed score rather than a count, so one
+ * strong hike outranks three forgettable ones. Order-independent, so it can
+ * never move the plan on its own (ROUTE-5).
+ */
+export function sightAffinity(
+  point: LatLng,
+  sideQuests: CorridorPoi[],
+  radiusMiles: number,
+): number {
+  let total = 0;
+  for (const p of sideQuests) {
+    if (haversineMiles(point, { lat: p.lat, lng: p.lng }) <= radiusMiles) total += p.score;
+  }
+  return total;
+}
+
+/**
  * Corridor split into fetch cells for the POI poller — ≤ ~1.5° per side so
  * Overpass queries and RIDB radius searches stay reasonably sized.
  */

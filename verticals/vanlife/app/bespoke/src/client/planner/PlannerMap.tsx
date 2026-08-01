@@ -21,6 +21,8 @@ export interface PlannerMapProps {
   pois: MapPoiView[];
   /** Says which set of places the dots are, so their vanishing is never a mystery. */
   poiSourceLabel: string;
+  /** Lowered when the dots are a small deliberate set rather than the catalog. */
+  poiMinZoom?: number;
   position: { lat: number; lng: number } | null;
   origin: MapOriginView | null;
   targets: MapTargetView[];
@@ -57,6 +59,7 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         routes={props.routes}
         highlightedId={props.highlightedId}
         pois={props.pois}
+        poiMinZoom={props.poiMinZoom}
         position={props.position}
         origin={props.origin}
         targets={props.targets}

@@ -451,6 +451,7 @@ export function MapView(props: MapViewProps): JSX.Element {
     }
 
     if (coords.length === 0) return;
+
     // fitBounds on a zero-area box zooms to maximum, so a lone point is eased
     // to instead of fitted.
     if (coords.length === 1) {
@@ -468,6 +469,15 @@ export function MapView(props: MapViewProps): JSX.Element {
     }
     map.fitBounds([[west, south], [east, north]], { padding: 48, duration: 500 });
   }, [props.fitKey, props.routes, props.position, props.origin, props.targets, props.fitTo, props.draftTarget, ready]);
+
+  // A small deliberate set of places must not vanish under the catalog's
+  // zoom floor — showing nothing would read as "there is nothing here".
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!map.getLayer("pois-dots")) return;
+    map.setLayerZoomRange("pois-dots", props.poiMinZoom ?? 7, 24);
+  }, [props.poiMinZoom, ready]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>

@@ -5,6 +5,7 @@ import { FINAL_TARGET_ID, type CandidateRouteView, type MapPoiView, type MapTarg
 import { haversineMiles } from "../../server/engine/geo.js";
 import { type CandidateDetail } from "../components/CandidateList.js";
 import { NeedsStrip, type NeedStateView } from "../components/NeedsStrip.js";
+import { NeedSearchSheet } from "../components/NeedSearchSheet.js";
 import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
 import { FormModal } from "../components/FormModal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
@@ -66,6 +67,11 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
   const [fitKey, setFitKey] = useState("init");
   const [fitTo, setFitTo] = useState<[number, number][] | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // Route-through-needs: the need whose stop search is open, the places it
+  // found (so the map can show them), and the row whose pin is in flight.
+  const [needSearch, setNeedSearch] = useState<NeedStateView | null>(null);
+  const [sheetPois, setSheetPois] = useState<MapPoiView[]>([]);
+  const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
   const [modal, setModal] = useState<
     | null
     | { kind: "trip-create" }
@@ -347,8 +353,36 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     lng: p.lng,
   }));
 
+  /**
+   * Pin the place for the trip, then replan so it lands in today's candidates.
+   * Not queued when offline: check-ins are the one write this app stores for
+   * later — everything else fails visibly.
+   */
+  function setPin(poiId: number, mark: "pinned" | null): void {
+    if (tripId === null) return;
+    setPendingPoiId(poiId);
+    markPoi.mutate(
+      { tripId, poiId, mark },
+      {
+        onSuccess: () => {
+          void utils.plan.needOptions.invalidate();
+          setToast(mark === null ? "Un-pinned — replanning…" : "Pinned — replanning…");
+          replan.mutate({ tripId });
+        },
+        onError: (e) => setToast(`Couldn't save: ${e.message}`),
+        onSettled: () => setPendingPoiId(null),
+      },
+    );
+  }
+
   const mapRoutes: CandidateRouteView[] = tab === "today" ? candidates : [];
   const needStates = (needsQ.data ?? []) as NeedStateView[];
+
+  // While a need's stop search is open the map shows exactly those places and
+  // says so — the catalog underneath would bury a twenty-place answer, and the
+  // dot layer's zoom floor is meant for hundreds, not twenty.
+  const searchOpen = needSearch !== null;
+  const searchPoiCoords: [number, number][] = sheetPois.map((p) => [p.lng, p.lat]);
   const digest = (digestQ.data ?? null) as DigestView | null;
 
   const originMovedOn =
@@ -630,10 +664,15 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
         <PlannerMap
           routes={mapRoutes}
           highlightedId={highlightedId}
-          pois={showingSuggestions ? suggestionPois : bboxPois}
+          pois={searchOpen ? sheetPois : showingSuggestions ? suggestionPois : bboxPois}
           poiSourceLabel={
-            showingSuggestions ? `Places inside ${selected?.name ?? "the selected Target"}` : "Places in view"
+            searchOpen
+              ? `Places that can service ${needSearch.need.title}`
+              : showingSuggestions
+                ? `Places inside ${selected?.name ?? "the selected Target"}`
+                : "Places in view"
           }
+          poiMinZoom={searchOpen ? 0 : 7}
           position={tripQ.data?.position ?? null}
           origin={
             tripQ.data
@@ -642,8 +681,8 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           }
           targets={mapTargets}
           draftTarget={draft.previewFor(flat)}
-          fitKey={fitKey}
-          fitTo={fitTo}
+          fitKey={searchOpen ? `need-${String(needSearch.need.id)}-${String(sheetPois.length)}` : fitKey}
+          fitTo={searchOpen && searchPoiCoords.length > 0 ? searchPoiCoords : fitTo}
           placingLabel={
             draft.placing ? (draft.placing.parentId === null ? "New Target" : "Narrowing") : null
           }
@@ -703,7 +742,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           <h4 style={{ margin: "8px 0 4px", fontSize: ".85rem", color: "#555" }}>
             Needs{picker.activeTripName ? ` — ${picker.activeTripName}` : ""}
           </h4>
-          <NeedsStrip states={needStates} />
+          <NeedsStrip states={needStates} onNeedSearch={setNeedSearch} />
 
           <div className="vl-tabs" role="tablist">
             {(["targets", "today", "trip"] as Tab[]).map((t) => (
@@ -812,6 +851,22 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
         </div>
       </div>
       {modals}
+      {needSearch !== null && tripId !== null ? (
+        <NeedSearchSheet
+          tripId={tripId}
+          need={needSearch.need}
+          candidateId={highlightedId}
+          pendingPoiId={pendingPoiId}
+          onPin={(poiId) => setPin(poiId, "pinned")}
+          onUnpin={(poiId) => setPin(poiId, null)}
+          onShowDetails={setPoiDetailId}
+          onOptionsChange={setSheetPois}
+          onClose={() => {
+            setNeedSearch(null);
+            setSheetPois([]);
+          }}
+        />
+      ) : null}
       {toast ? <div className="vl-toast">{toast}</div> : null}
     </div>
   );
