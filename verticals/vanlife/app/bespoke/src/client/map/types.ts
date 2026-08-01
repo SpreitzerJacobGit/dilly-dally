@@ -1,5 +1,20 @@
 /** Plain presentation types — MapView must stay free of tRPC/domain imports. */
 
+/**
+ * The synthesized final Target's id, mirroring engine/targets.ts.
+ *
+ * Duplicated rather than imported because this module is deliberately free of
+ * server imports; the map keys DOM markers by number and needs the sentinel.
+ */
+export const FINAL_TARGET_ID = -1;
+
+/**
+ * The id carried by the live draft ring while placing or dragging. Distinct
+ * from FINAL_TARGET_ID so the two sentinels can never be confused for each
+ * other when the map keys markers by id.
+ */
+export const DRAFT_TARGET_ID = -2;
+
 export interface RouteStopView {
   orderIndex: number;
   name: string;
@@ -18,7 +33,7 @@ export interface CandidateRouteView {
   title: string;
   /** GeoJSON LineString coordinates of today's leg. */
   coordinates: [number, number][];
-  /** Gray continuation to the anchor. */
+  /** Gray continuation to the final Target. */
   projected: [number, number][] | null;
   stops: RouteStopView[];
   selected: boolean;
@@ -33,40 +48,53 @@ export interface MapPoiView {
 }
 
 /**
- * An anchor region to draw. The ring arrives pre-computed — the map never does
+ * A Target to draw. The ring arrives pre-computed — the map never does
  * geometry, which is what keeps this component presentation-only.
  */
-export interface MapAnchorView {
+export interface MapTargetView {
   id: number;
   name: string;
   center: { lat: number; lng: number };
   radiusMiles: number;
-  /** Closed ring in [lng, lat] order. Null for an exact-point anchor. */
+  /** Closed ring in [lng, lat] order. Null for an exact-point Target. */
   ring: [number, number][] | null;
   depth: number;
   state: "pending" | "visited" | "skipped";
   /** Where the route actually passes through, if resolved. */
   resolved: { lat: number; lng: number } | null;
   selected: boolean;
+  /** The trip's destination. Drawn as a star rather than a number. */
+  final: boolean;
+  /** Its place in the list, for the pin label. Null for a nested narrowing. */
+  ordinal: number | null;
+}
+
+/** Where the trip starts, as distinct from where the van is now. */
+export interface MapOriginView {
+  name: string;
+  lat: number;
+  lng: number;
 }
 
 export interface MapViewProps {
   routes: CandidateRouteView[];
   highlightedId: number | null;
   pois: MapPoiView[];
+  /** Where the van is now — the last recorded position. */
   position: { lat: number; lng: number } | null;
-  /** Bump to re-fit the viewport to the routes. */
+  /** Bump to re-fit the viewport. */
   fitKey: string;
   /**
-   * Fit to exactly these [lng, lat] points instead of the routes — an open
-   * place search, say. Plain data: the map still knows nothing about what
-   * they mean, only that this is what should be on screen.
+   * Exactly what to frame on the next fit, in [lng, lat] order. Null fits
+   * everything on the map, which is what a trip switch wants; a selected
+   * Target passes its own ring so the fit does not zoom back out to the trip.
    */
-  fitCoords?: [number, number][];
+  fitTo?: [number, number][] | null;
   /**
    * Zoom below which places stop drawing. The default keeps a catalog of
    * hundreds from smearing the map when zoomed out; a caller showing a small
-   * deliberate set can lower it so the set is actually visible.
+   * deliberate set — an open place search, say — can lower it so the set is
+   * actually visible.
    */
   poiMinZoom?: number;
   onSelectRoute: (id: number) => void;
@@ -74,21 +102,23 @@ export interface MapViewProps {
   onPoiClick: (id: number) => void;
   onViewportChange: (bbox: { south: number; west: number; north: number; east: number }, zoom: number) => void;
   heightStyle: string;
-  /** Anchor regions to draw beneath the routes. */
-  anchors?: MapAnchorView[];
+  /** Targets to draw beneath the routes. */
+  targets?: MapTargetView[];
   /** Live preview while placing or resizing, drawn dashed. */
-  draftAnchor?: MapAnchorView | null;
-  onAnchorClick?: (id: number) => void;
+  draftTarget?: MapTargetView | null;
+  /** Where the trip starts, drawn as a static pin. */
+  origin?: MapOriginView | null;
+  onTargetClick?: (id: number) => void;
   /** Fires on any map click the layers did not consume; the page decides if it cares. */
   onMapClick?: (point: { lat: number; lng: number }) => void;
   /**
    * Centre handle dragged. Fires continuously with `done: false` for a live
    * preview, then once with `done: true` to commit.
    */
-  onAnchorCenterDrag?: (id: number, center: { lat: number; lng: number }, done: boolean) => void;
+  onTargetCenterDrag?: (id: number, center: { lat: number; lng: number }, done: boolean) => void;
   /**
    * Edge handle dragged, reporting the handle's raw position — the caller
    * converts that to a radius, so this component stays free of geometry.
    */
-  onAnchorRadiusDrag?: (id: number, handle: { lat: number; lng: number }, done: boolean) => void;
+  onTargetRadiusDrag?: (id: number, handle: { lat: number; lng: number }, done: boolean) => void;
 }

@@ -1,4 +1,5 @@
 import { useState, type JSX } from "react";
+import { readDigestDismissed, writeDigestDismissed } from "../lib/prefs.js";
 
 export interface DigestView {
   date: string;
@@ -17,9 +18,8 @@ export interface DigestView {
  * the other — not even when they share a browser.
  */
 export function DigestBanner(props: { digest: DigestView | null; userKey: string }): JSX.Element | null {
-  const dismissKey = `vl.digestDismissed.${props.userKey}`;
   const [dismissedDate, setDismissedDate] = useState<string | null>(
-    () => localStorage.getItem(dismissKey),
+    () => readDigestDismissed(props.userKey),
   );
   const [expanded, setExpanded] = useState(false);
   const d = props.digest;
@@ -38,7 +38,7 @@ export function DigestBanner(props: { digest: DigestView | null; userKey: string
           className="vl-checkin-btn"
           style={{ padding: "0 8px" }}
           onClick={() => {
-            localStorage.setItem(dismissKey, d.date);
+            writeDigestDismissed(props.userKey, d.date);
             setDismissedDate(d.date);
           }}
           title="Dismiss for me on this device"

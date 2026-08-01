@@ -15,6 +15,13 @@
  *
  * Determinism, as everywhere in this engine: no clock, no randomness, every
  * sort tie-breaks on id.
+ *
+ * A note on the word. The UI and the tRPC surface call these Targets, and a
+ * trip is now described to the operator as an Origin plus an ordered list of
+ * Targets. This module keeps "anchor" on purpose: here the word names the
+ * geometric object — a disc the route is constrained to cross — rather than
+ * the operator's list item. The seam between the two vocabularies is
+ * engine/targets.ts, which is the only place that should have to know both.
  */
 
 import { asc, eq, type Db } from "@elements/storage-sqlite-drizzle";

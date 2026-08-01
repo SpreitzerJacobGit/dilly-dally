@@ -6,7 +6,7 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "@elements/storage-sqlite-drizzle";
 import { users } from "@elements/identity-session-auth";
 
-/** A journey from an origin to an anchor destination, with its frozen budget baseline. */
+/** A journey from an Origin to a final Target, with its frozen budget baseline. */
 export const trips = sqliteTable(
   "trips",
   {
@@ -206,7 +206,7 @@ export const routeCandidates = sqliteTable(
     distanceMiles: real("distance_miles").notNull(),
     remainingBudgetMinutes: real("remaining_budget_minutes"), // Budget left after this day plus the direct continuation - the honesty figure behind ROUTE-1.
     geometry: text("geometry").notNull(), // GeoJSON LineString of today's leg.
-    projectedGeometry: text("projected_geometry"), // Gray continuation to the anchor.
+    projectedGeometry: text("projected_geometry"), // Gray continuation to the final Target.
     warnings: text("warnings"),
     status: text("status").notNull().default("proposed"), // proposed | selected | expired
     generatedAt: text("generated_at").notNull(),

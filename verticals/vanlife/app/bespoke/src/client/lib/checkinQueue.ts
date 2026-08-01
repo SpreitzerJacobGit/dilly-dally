@@ -5,6 +5,8 @@
  * else fails visibly.
  */
 
+import { CHECKIN_QUEUE_KEY as KEY } from "./prefs.js";
+
 export interface QueuedCheckIn {
   clientId: string;
   needId: number;
@@ -13,8 +15,6 @@ export interface QueuedCheckIn {
   note?: string;
   occurredAt: string;
 }
-
-const KEY = "vl.checkinQueue";
 
 export function newClientId(): string {
   return `ci-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`;
