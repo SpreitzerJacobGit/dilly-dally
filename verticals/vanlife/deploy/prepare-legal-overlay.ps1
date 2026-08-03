@@ -111,16 +111,24 @@ docker @gdal ogr2ogr -f GPKG /w/out/blm_4326.gpkg /w/SMA_WM.gdb SurfaceMgtAgy_BL
   -t_srs EPSG:4326 -nlt MULTIPOLYGON -select "ADMIN_ST,ADMIN_UNIT_NAME"
 if ($LASTEXITCODE -ne 0) { throw "BLM clip failed" }
 
-Write-Host "== Combine and simplify =="
+Write-Host "== Combine, clip and simplify =="
+# -clipdst, not just -spat: -spat selects every feature that *intersects* the box
+# but hands back its whole geometry, and these datasets are aggregated into
+# multipolygons spanning several states. Without clipping, BLM land reaches ~7
+# degrees past the basemap's eastern edge and would shade legality over a blank
+# map — the exact overreach the bbox exists to prevent.
+#
 # ~20 m of simplification: well inside the slop of a buffer whose width is itself
 # an assumption on most forests, and it removes most of the vertices. -makevalid
 # repairs the self-intersections simplification can introduce.
 Remove-Item (Join-Path $out "legal_combined.gpkg") -ErrorAction SilentlyContinue
 docker @gdal ogr2ogr -f GPKG /w/out/legal_combined.gpkg /w/out/blm_4326.gpkg blm_open_land `
-  -nln blm_open_land -lco GEOMETRY_NAME=geometry -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
+  -nln blm_open_land -lco GEOMETRY_NAME=geometry `
+  -clipdst $West $South $East $North -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
 if ($LASTEXITCODE -ne 0) { throw "BLM combine failed" }
 docker @gdal ogr2ogr -f GPKG -update -append /w/out/legal_combined.gpkg /w/out/usfs_corridor_5070.gpkg usfs_legal_corridor `
-  -nln usfs_legal_corridor -t_srs EPSG:4326 -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
+  -nln usfs_legal_corridor -t_srs EPSG:4326 `
+  -clipdst $West $South $East $North -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
 if ($LASTEXITCODE -ne 0) { throw "USFS combine failed" }
 
 Write-Host "== Tile to PMTiles =="
