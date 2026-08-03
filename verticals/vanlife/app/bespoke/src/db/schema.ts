@@ -1,7 +1,8 @@
 // GENERATED FROM data-model.yaml — DO NOT EDIT
-// model: sha256:de99327fb0dcc5b9 (STALE — the anchor columns on `waypoints` were
-// hand-edited in lockstep with data-model.yaml; the designer that computes this
-// hash is not in this repo. Re-run it to restore the invariant.)
+// model: sha256:de99327fb0dcc5b9 (STALE — the anchor columns on `waypoints`, and
+// the removal of `unit`/`capacity` from `needs` when levels became percentages,
+// were hand-edited in lockstep with data-model.yaml; the designer that computes
+// this hash is not in this repo. Re-run it to restore the invariant.)
 /** Bespoke tables for Dilly-Dally. Element-owned tables live in their elements. */
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "@elements/storage-sqlite-drizzle";
 import { users } from "@elements/identity-session-auth";
@@ -106,13 +107,11 @@ export const poiMarks = sqliteTable(
   (table) => [uniqueIndex("poi_marks_trip_poi").on(table.tripId, table.poiId)],
 );
 
-/** A tracked van-life need with capacity, thresholds, and its servicing place category. */
+/** A tracked van-life need with its thresholds and its servicing place category. */
 export const needs = sqliteTable("needs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   key: text("need_key").notNull().unique(), // Seeded: food | gas | water | laundry | trash | wastewater | electric | internet; operator-created needs slug their title.
   title: text("title").notNull(),
-  unit: text("unit").notNull(),
-  capacity: real("capacity").notNull(),
   direction: text("direction").notNull(), // depletes | accumulates
   warnRatio: real("warn_ratio").notNull().default(0.25), // Runway fraction at which the need is worth planning for.
   urgentRatio: real("urgent_ratio").notNull().default(0.1), // Runway fraction at which the need is urgent.
@@ -120,7 +119,7 @@ export const needs = sqliteTable("needs", {
   routingDriver: integer("routing_driver", { mode: "boolean" }).notNull().default(true), // Internet is tracked but never generates stops.
   sortOrder: integer("sort_order").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
-  trackingMode: text("tracking_mode").notNull().default("level"), // level = consumable with a capacity and a rate; date = simply due on a day.
+  trackingMode: text("tracking_mode").notNull().default("level"), // level = a 0-100% consumable with a rate; date = simply due on a day.
   dueAt: text("due_at"), // When a date-tracked need falls due. Null for level-tracked needs.
   warnDays: real("warn_days"), // Days before dueAt at which a date-tracked need is worth planning for.
   urgentDays: real("urgent_days"), // Days before dueAt at which a date-tracked need is urgent.

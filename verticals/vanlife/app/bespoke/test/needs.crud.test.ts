@@ -58,8 +58,6 @@ describe("archiving and deleting a need", () => {
       .values({
         key: "propane",
         title: "Propane",
-        unit: "gal",
-        capacity: 20,
         direction: "depletes",
         warnRatio: 0.25,
         urgentRatio: 0.1,
@@ -73,7 +71,7 @@ describe("archiving and deleting a need", () => {
     const needId = rows[0]!.id;
     await handle.db.insert(needRates).values({
       needId,
-      ratePerDay: 0.5,
+      ratePerDay: 2.5,
       ratePerMile: 0,
       source: "manual",
       effectiveFrom: NOW,

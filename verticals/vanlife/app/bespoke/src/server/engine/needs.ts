@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, type Db } from "@elements/storage-sqlite-drizz
 import { evaluateThreshold } from "@elements/processing-threshold-rules";
 import { users } from "@elements/identity-session-auth";
 import { checkIns, needRates, needs, progressEvents } from "../../db/schema.js";
+import { FULL_LEVEL } from "../../shared/levels.js";
 
 /**
  * The consumption model. A need's level is NEVER stored — it is derived at
@@ -12,19 +13,21 @@ import { checkIns, needRates, needs, progressEvents } from "../../db/schema.js";
  * continuous in elapsed time and recorded miles, which no SUM over rows can
  * express.)
  *
- * Everything is normalized to RUNWAY — units of headroom left before the need
- * runs dry (depleting needs) or overflows (accumulating ones). Rates consume
- * runway in both directions, which makes projection, deadlines, and threshold
- * evaluation identical for "water is getting empty" and "trash is getting
- * full".
+ * A level-tracked need is a PERCENTAGE. There is no per-need capacity: every
+ * tank runs 0 to FULL_LEVEL whether it holds water, fuel or trash, because a
+ * percentage is what an operator can read off a gauge without converting.
+ *
+ * Everything is normalized to RUNWAY — percentage points of headroom left
+ * before the need runs dry (depleting needs) or overflows (accumulating ones).
+ * Rates consume runway in both directions, which makes projection, deadlines,
+ * and threshold evaluation identical for "water is getting empty" and "trash
+ * is getting full".
  */
 
 export interface NeedRow {
   id: number;
   key: string;
   title: string;
-  unit: string;
-  capacity: number;
   direction: string;
   warnRatio: number;
   urgentRatio: number;
@@ -32,7 +35,7 @@ export interface NeedRow {
   routingDriver: boolean;
   sortOrder: number;
   active: boolean;
-  /** "level" = consumable with a capacity and a rate; "date" = simply due on a day. */
+  /** "level" = a 0-100% consumable with a rate; "date" = simply due on a day. */
   trackingMode: string;
   dueAt: string | null;
   warnDays: number | null;
@@ -57,9 +60,9 @@ export type NeedUrgency = "ok" | "warn" | "urgent";
 export interface NeedState {
   need: NeedRow;
   rate: RateInfo;
-  /** Natural level (water gallons remaining; trash bags accumulated). */
+  /** How full it physically is, 0-100 (water remaining; trash accumulated). */
   level: number;
-  /** Headroom before dry/overflow, in the need's units. */
+  /** Percentage points of headroom before dry/overflow. */
   runway: number;
   runwayRatio: number;
   urgency: NeedUrgency;
@@ -86,7 +89,7 @@ const MS_PER_DAY = 86_400_000;
  * Events must be sorted ascending by occurredAt.
  */
 export function deriveRunway(
-  need: Pick<NeedRow, "capacity" | "direction">,
+  need: Pick<NeedRow, "direction">,
   events: CheckInEvent[],
   rate: { ratePerDay: number; ratePerMile: number },
   nowIso: string,
@@ -94,7 +97,7 @@ export function deriveRunway(
 ): { level: number; runway: number; anchorAt: string | null } {
   // Find the latest absolute anchor: a set-level, or a full-reset service.
   let anchorIdx = -1;
-  let anchorRunway = need.capacity; // trip-start assumption: everything full/empty
+  let anchorRunway = FULL_LEVEL; // trip-start assumption: everything full/empty
   let anchorAt: string | null = null;
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]!;
@@ -105,7 +108,7 @@ export function deriveRunway(
       break;
     }
     if (e.kind === "service" && e.quantity === null) {
-      anchorRunway = need.capacity;
+      anchorRunway = FULL_LEVEL;
       anchorIdx = i;
       anchorAt = e.occurredAt;
       break;
@@ -122,16 +125,16 @@ export function deriveRunway(
   const days = Math.max(0, (Date.parse(nowIso) - Date.parse(from)) / MS_PER_DAY);
   const miles = milesBetween(from, nowIso);
   runway -= rate.ratePerDay * days + rate.ratePerMile * miles;
-  runway = Math.min(need.capacity, Math.max(0, runway));
+  runway = Math.min(FULL_LEVEL, Math.max(0, runway));
   return { level: runwayToLevel(need, runway), runway, anchorAt };
 }
 
-export function runwayToLevel(need: Pick<NeedRow, "capacity" | "direction">, runway: number): number {
-  return need.direction === "accumulates" ? need.capacity - runway : runway;
+export function runwayToLevel(need: Pick<NeedRow, "direction">, runway: number): number {
+  return need.direction === "accumulates" ? FULL_LEVEL - runway : runway;
 }
 
-export function levelToRunway(need: Pick<NeedRow, "capacity" | "direction">, level: number): number {
-  return need.direction === "accumulates" ? need.capacity - level : level;
+export function levelToRunway(need: Pick<NeedRow, "direction">, level: number): number {
+  return need.direction === "accumulates" ? FULL_LEVEL - level : level;
 }
 
 /**
@@ -139,11 +142,11 @@ export function levelToRunway(need: Pick<NeedRow, "capacity" | "direction">, lev
  * warn floor is warn; at or below the urgent floor is urgent.
  */
 export function runwayUrgency(
-  need: Pick<NeedRow, "capacity" | "warnRatio" | "urgentRatio">,
+  need: Pick<NeedRow, "warnRatio" | "urgentRatio">,
   runway: number,
 ): NeedUrgency {
-  if (runway <= need.capacity * need.urgentRatio) return "urgent";
-  const state = evaluateThreshold({ level: runway, threshold: need.capacity * need.warnRatio });
+  if (runway <= FULL_LEVEL * need.urgentRatio) return "urgent";
+  const state = evaluateThreshold({ level: runway, threshold: FULL_LEVEL * need.warnRatio });
   return state.status === "ok" ? "ok" : "warn";
 }
 
@@ -152,7 +155,7 @@ export const DEFAULT_WARN_DAYS = 14;
 export const DEFAULT_URGENT_DAYS = 3;
 
 /**
- * Date-tracked needs — an oil change, a registration renewal — have no capacity
+ * Date-tracked needs — an oil change, a registration renewal — have no level
  * and no drain. They are simply due on a day, so their "runway" is the days left
  * until that day. Expressing them in the same runway/urgency/deadline vocabulary
  * as consumables is what lets one gauge, one sort, and one digest serve both.
@@ -223,13 +226,13 @@ export function projectRunway(
 
 /** Wall-clock instant the runway reaches the urgent floor, if it ever does. */
 export function wallClockDeadline(
-  need: Pick<NeedRow, "capacity" | "urgentRatio">,
+  need: Pick<NeedRow, "urgentRatio">,
   runway: number,
   ratePerDay: number,
   nowIso: string,
 ): string | null {
   if (ratePerDay <= 0) return null;
-  const floor = need.capacity * need.urgentRatio;
+  const floor = FULL_LEVEL * need.urgentRatio;
   const days = Math.max(0, (runway - floor) / ratePerDay);
   return new Date(Date.parse(nowIso) + days * MS_PER_DAY).toISOString();
 }
@@ -261,20 +264,26 @@ export function deadlineMilesAlongRoute(
 
 /**
  * Rate refinement from pairs of consecutive full-reset services: each pair
- * consumed a full capacity (plus partials in between) over its (days, miles)
- * gap. The rate is attributed to the need's dominant driver — miles for gas,
- * days for everything else — and the suggestion is the median of the last 8
- * samples, offered only once 3 samples exist and it moves the rate by >15%.
- * Suggestions NEVER apply themselves.
+ * consumed a full 100% (plus partials in between) over its (days, miles) gap.
+ * The rate is attributed to the need's dominant driver, and the suggestion is
+ * the median of the last 8 samples, offered only once 3 samples exist and it
+ * moves the rate by >15%. Suggestions NEVER apply themselves.
+ *
+ * Which driver owns a need is now a property of its RATE rather than its key.
+ * A need that drains with driving says so by carrying a per-mile rate; the old
+ * `key === "gas"` test could not say it for a second tank or for a propane
+ * need an operator adds, since operator-created needs slug their own title.
+ * The trade-off: a need whose per-mile rate is zero will never bootstrap into
+ * a per-mile suggestion. That is the honest reading — nothing about such a
+ * need claims mileage matters — and the seeded fuel need ships with one.
  */
 export function rateSuggestionFromHistory(
-  need: Pick<NeedRow, "key" | "capacity">,
   events: CheckInEvent[],
   current: { ratePerDay: number; ratePerMile: number },
   milesBetween: (fromIso: string, toIso: string) => number,
 ): RateSuggestion | null {
   const resets = events.filter((e) => e.kind === "service" && e.quantity === null);
-  const mileDriven = need.key === "gas";
+  const mileDriven = current.ratePerMile > 0;
   const samples: number[] = [];
   for (let i = 1; i < resets.length; i++) {
     const from = resets[i - 1]!.occurredAt;
@@ -282,7 +291,7 @@ export function rateSuggestionFromHistory(
     const partials = events
       .filter((e) => e.kind === "service" && e.quantity !== null && e.occurredAt > from && e.occurredAt < to)
       .reduce((sum, e) => sum + (e.quantity ?? 0), 0);
-    const consumed = need.capacity + partials;
+    const consumed = FULL_LEVEL + partials;
     const denom = mileDriven
       ? milesBetween(from, to)
       : (Date.parse(to) - Date.parse(from)) / MS_PER_DAY;
@@ -349,7 +358,7 @@ export async function loadNeedStates(
       ratePerMile: latestRate?.ratePerMile ?? 0,
       source: latestRate?.source ?? "manual",
     };
-    // Date-tracked needs have no capacity to drain and no rate to refine, so they
+    // Date-tracked needs have no level to drain and no rate to refine, so they
     // skip the consumption model entirely — but return the same shape, which is why
     // candidates, the digest and the gauges need no idea the two kinds differ. A
     // zero rate is also what keeps them out of the service-stop loop in candidates.
@@ -370,12 +379,16 @@ export async function loadNeedStates(
       rate,
       level: round2(level),
       runway: round2(runway),
-      runwayRatio: need.capacity > 0 ? round2(runway / need.capacity) : 0,
+      // Redundant with `runway` now that runway IS a percentage — but NOT for a
+      // date-tracked need, which fills this against its service interval. Keeping
+      // one field both modes populate is what lets one gauge render both; do not
+      // "simplify" it away.
+      runwayRatio: round2(runway / FULL_LEVEL),
       urgency: runwayUrgency(need, runway),
       asOf: nowIso,
       lastCheckInAt: events.at(-1)?.occurredAt ?? null,
       deadlineAt: wallClockDeadline(need, runway, rate.ratePerDay, nowIso),
-      suggestion: rateSuggestionFromHistory(need, events, rate, milesBetween),
+      suggestion: rateSuggestionFromHistory(events, rate, milesBetween),
     };
   });
 }

@@ -43,6 +43,7 @@ import {
   tripCreateSchema,
   tripUpdateSchema,
 } from "./schemas.js";
+import { FULL_LEVEL } from "../shared/levels.js";
 import { checkInHistory, loadNeedStates, rollDueDate, slugifyKey } from "./engine/needs.js";
 import {
   budgetUsage,
@@ -791,10 +792,9 @@ export const needsRouter = router({
         .values({
           key,
           title: input.title,
-          // A date-tracked need counts down in days; capacity and direction are
-          // inert for it, but the columns are NOT NULL for every other reader.
-          unit: dateTracked ? "days" : input.unit,
-          capacity: dateTracked ? 1 : (input.capacity ?? 1),
+          // A date-tracked need counts down in days rather than draining, so
+          // direction is inert for it — but the column is NOT NULL for every
+          // other reader.
           direction: dateTracked ? "depletes" : input.direction,
           warnRatio: input.warnRatio,
           urgentRatio: input.urgentRatio,
@@ -854,10 +854,10 @@ export const needsRouter = router({
       if (input.kind === "set-level" && input.quantity === undefined) {
         rejectIntake("A set-level correction needs a level");
       }
-      // A date-tracked need has no capacity, so the plausibility ceiling is
+      // A date-tracked need has no level, so the plausibility ceiling is
       // meaningless for it — its check-ins carry no quantity at all.
-      if (!dateTracked && input.quantity !== undefined && input.quantity > need.capacity * 1.5) {
-        rejectIntake(`Quantity exceeds ${need.title}'s capacity by too much to be plausible`);
+      if (!dateTracked && input.quantity !== undefined && input.quantity > FULL_LEVEL * 1.5) {
+        rejectIntake(`A level above ${String(FULL_LEVEL * 1.5)}% is too far past full to be plausible`);
       }
       if (input.clientId) {
         const dupe = await db
@@ -919,15 +919,13 @@ export const needsRouter = router({
       const need = (await db.select().from(needs).where(eq(needs.id, needId)))[0];
       if (!need) rejectIntake("Need not found");
       // A need cannot be left half-converted: switching to date tracking without
-      // ever naming a due date would leave it permanently unscheduled, and
-      // switching back to a level without a capacity would make it undrainable.
+      // ever naming a due date would leave it permanently unscheduled. There is
+      // no matching check going the other way — every level need runs 0-100%, so
+      // one can no longer be created undrainable.
       const mode = fields.trackingMode ?? need.trackingMode;
       if (mode === "date") {
         const dueAt = fields.dueAt !== undefined ? fields.dueAt : need.dueAt;
         if (!dueAt) rejectIntake(`${need.title} needs a due date to be tracked by date`);
-      } else if (mode === "level") {
-        const capacity = fields.capacity ?? need.capacity;
-        if (!capacity || capacity <= 0) rejectIntake(`${need.title} needs a capacity to be tracked by level`);
       }
       const warnRatio = fields.warnRatio ?? need.warnRatio;
       const urgentRatio = fields.urgentRatio ?? need.urgentRatio;

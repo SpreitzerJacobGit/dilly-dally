@@ -16,6 +16,7 @@ import {
   trips,
   waypoints,
 } from "../../db/schema.js";
+import { FULL_LEVEL } from "../../shared/levels.js";
 import {
   detourEstimateMinutes,
   haversineMiles,
@@ -463,7 +464,7 @@ async function buildRole(
   for (const state of ctx.needStates) {
     const { need, rate } = state;
     if (!need.routingDriver || !need.poiCategory || rate.ratePerDay + rate.ratePerMile <= 0) continue;
-    const warnFloor = need.capacity * need.warnRatio;
+    const warnFloor = FULL_LEVEL * need.warnRatio;
     const crossesToday = deadlineMilesAlongRoute(state.runway, rate, warnFloor, dayTable) !== null;
     const urgentSoon =
       state.deadlineAt !== null && Date.parse(state.deadlineAt) < Date.parse(ctx.nowIso) + 36 * 3_600_000;

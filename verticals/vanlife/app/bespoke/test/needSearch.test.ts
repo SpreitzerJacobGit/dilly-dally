@@ -175,8 +175,6 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{
       .values({
         key: "water",
         title: "Fresh water",
-        unit: "gal",
-        capacity: 40,
         direction: "depletes",
         warnRatio: 0.25,
         urgentRatio: 0.1,
@@ -189,7 +187,7 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{
   )[0]!.id;
   await db.insert(needRates).values({
     needId,
-    ratePerDay: 6,
+    ratePerDay: 15,
     ratePerMile: 0,
     source: "manual",
     effectiveFrom: T0,
@@ -198,7 +196,7 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{
   await db.insert(checkIns).values({
     needId,
     kind: "set-level",
-    quantity: 12,
+    quantity: 30,
     recordedBy: uid,
     occurredAt: daysAgo(0.5),
     createdAt: daysAgo(0.5),
@@ -207,8 +205,6 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{
   await db.insert(needs).values({
     key: "internet",
     title: "Work internet",
-    unit: "bars",
-    capacity: 5,
     direction: "depletes",
     warnRatio: 0.25,
     urgentRatio: 0.1,

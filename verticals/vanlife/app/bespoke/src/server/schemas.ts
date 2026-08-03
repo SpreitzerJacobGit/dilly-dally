@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FULL_LEVEL, rateFromRange } from "../shared/levels.js";
 
 /** Shared input schemas — one source for server validation and client forms. */
 
@@ -91,7 +92,8 @@ export const targetReorderSchema = z.object({
 export const checkInSchema = z.object({
   needId: z.number().int(),
   kind: z.enum(["service", "set-level"]),
-  quantity: z.number().min(0).optional(),
+  /** Percentage points. The ceiling is a constant now, not a per-need capacity. */
+  quantity: z.number().min(0).max(FULL_LEVEL * 1.5).optional(),
   note: z.string().max(300).optional(),
   location: latLngSchema.optional(),
   poiId: z.number().int().optional(),
@@ -111,24 +113,45 @@ export const dueAtSchema = z
   .transform((v) => (v.length === 10 ? `${v}T23:59:59.000Z` : v));
 
 /**
+ * A drain rate may arrive either way round. Storage is percent-per-day and
+ * percent-per-mile, but an operator knows the RANGE — "a full tank lasts about
+ * 450 miles" — so the range fields win when present and are inverted here, at
+ * the boundary, rather than in each caller. An API client that already thinks
+ * in percent is not forced to invert.
+ */
+const rangeFields = {
+  ratePerDay: z.number().min(0).default(0),
+  ratePerMile: z.number().min(0).default(0),
+  daysToEmpty: z.number().positive().max(3650).optional(),
+  milesToEmpty: z.number().positive().max(10000).optional(),
+};
+
+function resolveRates<T extends { ratePerDay: number; ratePerMile: number; daysToEmpty?: number; milesToEmpty?: number }>(
+  v: T,
+): T {
+  return {
+    ...v,
+    ratePerDay: v.daysToEmpty === undefined ? v.ratePerDay : rateFromRange(v.daysToEmpty),
+    ratePerMile: v.milesToEmpty === undefined ? v.ratePerMile : rateFromRange(v.milesToEmpty),
+  };
+}
+
+/**
  * Creating a need. The two tracking modes need disjoint fields — a consumable
- * has a capacity and a rate, a date-tracked concern has a due date and lead
- * times — so the shared object validates whichever set the mode calls for.
+ * runs 0-100% at a rate, a date-tracked concern has a due date and lead times
+ * — so the shared object validates whichever set the mode calls for.
  */
 export const needCreateSchema = z
   .object({
     title: z.string().min(1).max(60),
-    unit: z.string().min(1).max(20).default("units"),
     trackingMode: trackingModeSchema.default("level"),
     poiCategory: z.string().max(40).nullable().default(null),
     routingDriver: z.boolean().optional(),
     // Level mode.
-    capacity: z.number().positive().optional(),
     direction: z.enum(["depletes", "accumulates"]).default("depletes"),
     warnRatio: z.number().min(0).max(0.9).default(0.25),
     urgentRatio: z.number().min(0).max(0.5).default(0.1),
-    ratePerDay: z.number().min(0).default(0),
-    ratePerMile: z.number().min(0).default(0),
+    ...rangeFields,
     // Date mode.
     dueAt: dueAtSchema.optional(),
     warnDays: z.number().min(0).max(3650).optional(),
@@ -136,9 +159,6 @@ export const needCreateSchema = z
     serviceIntervalDays: z.number().min(0).max(3650).optional(),
   })
   .superRefine((v, ctx) => {
-    if (v.trackingMode === "level" && (v.capacity === undefined || v.capacity <= 0)) {
-      ctx.addIssue({ code: "custom", path: ["capacity"], message: "A level-tracked need needs a capacity" });
-    }
     if (v.trackingMode === "date" && v.dueAt === undefined) {
       ctx.addIssue({ code: "custom", path: ["dueAt"], message: "A date-tracked need needs a due date" });
     }
@@ -148,7 +168,8 @@ export const needCreateSchema = z
     if (v.warnDays !== undefined && v.urgentDays !== undefined && v.urgentDays > v.warnDays) {
       ctx.addIssue({ code: "custom", path: ["urgentDays"], message: "Urgent must fall at or after warn" });
     }
-  });
+  })
+  .transform(resolveRates);
 
 /**
  * Editing a need. Every field is optional because rename, retune, re-mode and
@@ -158,9 +179,7 @@ export const needCreateSchema = z
 export const needConfigureSchema = z.object({
   needId: z.number().int(),
   title: z.string().min(1).max(60).optional(),
-  unit: z.string().min(1).max(20).optional(),
   trackingMode: trackingModeSchema.optional(),
-  capacity: z.number().positive().optional(),
   direction: z.enum(["depletes", "accumulates"]).optional(),
   warnRatio: z.number().min(0).max(0.9).optional(),
   urgentRatio: z.number().min(0).max(0.5).optional(),
@@ -174,12 +193,13 @@ export const needConfigureSchema = z.object({
   active: z.boolean().optional(),
 });
 
-export const rateSetSchema = z.object({
-  needId: z.number().int(),
-  ratePerDay: z.number().min(0),
-  ratePerMile: z.number().min(0).default(0),
-  note: z.string().max(300).optional(),
-});
+export const rateSetSchema = z
+  .object({
+    needId: z.number().int(),
+    ...rangeFields,
+    note: z.string().max(300).optional(),
+  })
+  .transform(resolveRates);
 
 /**
  * Route-through-needs: the places that can service one need, ranked against

@@ -152,15 +152,15 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{ handle: DbHandle; trip:
     occurredAt: daysAgo(1),
   });
 
-  // Water sits just under its warn floor, so a stop is forced today.
+  // Water sits just under its warn floor, so a stop is forced today: 30% left
+  // against a 25% floor, draining 15%/day. (Formerly 12 gal of a 40 gal tank at
+  // 6 gal/day — the same scenario, rescaled when levels became percentages.)
   const needId = (
     await db
       .insert(needs)
       .values({
         key: "water",
         title: "Fresh water",
-        unit: "gal",
-        capacity: 40,
         direction: "depletes",
         warnRatio: 0.25,
         urgentRatio: 0.1,
@@ -173,7 +173,7 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{ handle: DbHandle; trip:
   )[0]!.id;
   await db.insert(needRates).values({
     needId,
-    ratePerDay: 6,
+    ratePerDay: 15,
     ratePerMile: 0,
     source: "manual",
     effectiveFrom: T0,
@@ -182,7 +182,7 @@ async function seedWorld(poiSeeds: PoiSeed[]): Promise<{ handle: DbHandle; trip:
   await db.insert(checkIns).values({
     needId,
     kind: "set-level",
-    quantity: 12,
+    quantity: 30,
     recordedBy: uid,
     occurredAt: daysAgo(0.5),
     createdAt: daysAgo(0.5),
