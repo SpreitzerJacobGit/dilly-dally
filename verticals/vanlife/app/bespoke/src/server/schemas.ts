@@ -195,6 +195,18 @@ export const needOptionsSchema = z.object({
   limit: z.number().int().min(1).max(50).default(20),
 });
 
+/**
+ * Free-text place lookup. One field for all three ways in — a city, a region,
+ * and a street address are the same query to Nominatim, so the operator is
+ * never asked to declare which one they are typing. `near` only biases the
+ * ranking; it never filters, so a far-away match is still reachable.
+ */
+export const placeSearchSchema = z.object({
+  query: z.string().min(3).max(200),
+  limit: z.number().int().min(1).max(10).default(5),
+  near: latLngSchema.optional(),
+});
+
 export const bboxSchema = z.object({
   south: z.number().min(-90).max(90),
   west: z.number().min(-180).max(180),

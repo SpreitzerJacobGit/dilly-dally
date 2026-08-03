@@ -13,6 +13,7 @@ import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
 import { FormModal } from "../components/FormModal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { newClientId } from "../lib/checkinQueue.js";
+import { readGrantedFix } from "../lib/geocode.js";
 import { VL_STYLES } from "../styles.js";
 
 /**
@@ -151,8 +152,17 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
   const live = all.filter((s) => s.need.active);
   const archived = all.filter((s) => !s.need.active);
 
-  function handleCheckIn(req: CheckInRequest): void {
-    checkin.mutate({ ...req, clientId: newClientId(), occurredAt: new Date().toISOString() });
+  /** Stamp where we were, when that is free — see readGrantedFix. */
+  async function handleCheckIn(req: CheckInRequest): Promise<void> {
+    const clientId = newClientId();
+    const occurredAt = new Date().toISOString();
+    const fix = await readGrantedFix();
+    checkin.mutate({
+      ...req,
+      clientId,
+      occurredAt,
+      ...(fix ? { location: { lat: fix.lat, lng: fix.lng } } : {}),
+    });
   }
 
   function settingCell(s: NeedRowView): string {
@@ -543,7 +553,7 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
             { name: "note", label: "Note", placeholder: "Optional" },
           ]}
           onSubmit={(v) =>
-            handleCheckIn({
+            void handleCheckIn({
               needId: dialog.row.need.id,
               kind: "set-level",
               quantity: Number(v.level),

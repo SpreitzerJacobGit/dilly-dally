@@ -7,11 +7,12 @@ import { type CandidateDetail } from "../components/CandidateList.js";
 import { NeedsStrip, type NeedStateView } from "../components/NeedsStrip.js";
 import { NeedSearchSheet } from "../components/NeedSearchSheet.js";
 import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
-import { FormModal } from "../components/FormModal.js";
+import { SetPositionModal } from "../planner/SetPositionModal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { DigestView } from "../components/DigestBanner.js";
 import type { TargetTreeNode, DropZone } from "../components/TargetTree.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
+import { readGrantedFix } from "../lib/geocode.js";
 import { readHiddenPoiCategories, writeHiddenPoiCategories } from "../lib/prefs.js";
 import { ALL_CATEGORIES } from "../map/palette.js";
 import { VL_STYLES } from "../styles.js";
@@ -488,11 +489,14 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     });
   };
 
-  function handleCheckIn(req: CheckInRequest): void {
+  /** Stamp where we were, when that is free — see readGrantedFix. */
+  async function handleCheckIn(req: CheckInRequest): Promise<void> {
     const clientId = newClientId();
     const occurredAt = new Date().toISOString();
+    const fix = await readGrantedFix();
+    const located = fix ? { ...req, location: { lat: fix.lat, lng: fix.lng } } : req;
     checkin.mutate(
-      { ...req, clientId, occurredAt },
+      { ...located, clientId, occurredAt },
       {
         onSuccess: () => setToast("Check-in recorded"),
         onError: (err) => {
@@ -500,7 +504,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
             setToast(err.message);
             return;
           }
-          enqueue({ clientId, occurredAt, ...req });
+          enqueue({ clientId, occurredAt, ...located });
           utils.needs.list.setData(undefined, (prev) =>
             prev?.map((s) =>
               s.need.id === req.needId && req.kind === "service" && req.quantity === undefined
@@ -657,23 +661,9 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
         }}
       />
     ) : modal?.kind === "set-position" ? (
-      <FormModal
-        title="We are here"
-        hint="Plans generated after this start from the given position."
-        fields={[
-          { name: "lat", label: "Latitude", type: "number", min: -90, max: 90, required: true },
-          { name: "lng", label: "Longitude", type: "number", min: -180, max: 180, required: true },
-          { name: "miles", label: "Miles driven since last recorded position (approx.)", type: "number", min: 0, defaultValue: "0", required: true },
-        ]}
-        submitLabel="Set position"
-        onSubmit={(v) =>
-          setPositionMut.mutate({
-            tripId,
-            lat: Number(v.lat),
-            lng: Number(v.lng),
-            milesSinceLast: Number(v.miles),
-          })
-        }
+      <SetPositionModal
+        busy={setPositionMut.isPending}
+        onSubmit={(v) => setPositionMut.mutate({ tripId, ...v })}
         onClose={() => setModal(null)}
       />
     ) : modal?.kind === "confirm-delete-trip" ? (

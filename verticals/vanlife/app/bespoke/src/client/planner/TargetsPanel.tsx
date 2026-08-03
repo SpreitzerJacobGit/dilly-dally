@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { TargetTree, type TargetTreeNode, type DropZone } from "../components/TargetTree.js";
 import { GeocodeField } from "../components/GeocodeField.js";
+import { shortPlaceName } from "../lib/geocode.js";
 import { OriginRow } from "./OriginRow.js";
 import { FinalTargetRow } from "./FinalTargetRow.js";
 import { TargetDetail, type SuggestedPlace } from "./TargetDetail.js";
@@ -117,9 +118,10 @@ export function TargetsPanel(props: TargetsPanelProps): JSX.Element {
         <div className="vl-anchor-editor">
           <GeocodeField
             label={placing.parentId === null ? "New Target" : "Narrowing"}
+            value={draft?.name ?? null}
             onPick={(h) =>
               props.onDraftChange({
-                name: h.name.split(",")[0] ?? h.name,
+                name: shortPlaceName(h.name),
                 center: { lat: h.lat, lng: h.lng },
                 radiusMiles: h.suggestedRadiusMiles,
               })

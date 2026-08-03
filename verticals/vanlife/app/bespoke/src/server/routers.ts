@@ -37,6 +37,8 @@ import {
   needConfigureSchema,
   needCreateSchema,
   needOptionsSchema,
+  latLngSchema,
+  placeSearchSchema,
   rateSetSchema,
   tripCreateSchema,
   tripUpdateSchema,
@@ -55,6 +57,7 @@ import {
   type TripRow,
 } from "./engine/candidates.js";
 import { anchorPois, corridorPois } from "./engine/pois.js";
+import { reversePlace, searchPlaces } from "./engine/geocoder.js";
 import { needFacilityOptions } from "./engine/needSearch.js";
 import { withinDisc } from "./engine/geo.js";
 import {
@@ -1003,6 +1006,22 @@ export const poisRouter = router({
     .mutation(async ({ ctx, input }) =>
       importPoiDataset({ db: ctx.dbHandle.db, onPois, records: input.records, label: input.label }),
     ),
+});
+
+/**
+ * Place lookup, proxied. The browser cannot send the User-Agent Nominatim's
+ * policy requires, and cannot remember an answer for the next time the uplink
+ * is gone — both of which are the server's job. Queries, not mutations: they
+ * are reads, and the caching they do is an implementation detail of the read.
+ */
+export const placesRouter = router({
+  search: op
+    .input(placeSearchSchema)
+    .query(async ({ ctx, input }) =>
+      searchPlaces(ctx.dbHandle.db, input.query, { limit: input.limit, near: input.near }),
+    ),
+
+  reverse: op.input(latLngSchema).query(async ({ ctx, input }) => reversePlace(ctx.dbHandle.db, input)),
 });
 
 export const interestsRouter = router({

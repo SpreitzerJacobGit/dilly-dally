@@ -291,3 +291,16 @@ export const interestWeights = sqliteTable("interest_weights", {
   weight: real("weight").notNull().default(1),
   updatedAt: text("updated_at").notNull(),
 });
+
+/** A remembered geocoder answer, so a place found with an uplink stays findable without one. */
+export const placeLookups = sqliteTable(
+  "place_lookups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").notNull(), // search | reverse
+    queryKey: text("query_key").notNull(), // Normalized query - lowercased and collapsed for search, lat/lng rounded to 3dp for reverse.
+    resultsJson: text("results_json").notNull(),
+    fetchedAt: text("fetched_at").notNull(),
+  },
+  (table) => [uniqueIndex("place_lookups_kind_query").on(table.kind, table.queryKey)],
+);

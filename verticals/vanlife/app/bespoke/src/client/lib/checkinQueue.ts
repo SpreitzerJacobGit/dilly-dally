@@ -13,6 +13,9 @@ export interface QueuedCheckIn {
   kind: "service" | "set-level";
   quantity?: number;
   note?: string;
+  /** Where we were, when the device offered it freely. Optional forever: older
+   *  queued entries predate it, and a check-in never required a location. */
+  location?: { lat: number; lng: number };
   occurredAt: string;
 }
 
