@@ -116,10 +116,30 @@ export const VL_STYLES = `
 .vl-offline { background: #fef3c7; border: 1px solid #d97706; border-radius: 8px;
   padding: 6px 10px; font-size: .85rem; margin-bottom: 8px; }
 
-.vl-legend { position: absolute; bottom: 10px; left: 8px; z-index: 5; background: #ffffffdd;
-  border-radius: 8px; padding: 6px 10px; font-size: .75rem; border: 1px solid #ddd; }
-.vl-legend div { display: flex; align-items: center; gap: 6px; }
+/* Legend and place filter. Rows are addressed by class, never as ".vl-legend div":
+   the panel nests now, and a bare descendant selector would flex the wrappers too. */
+.vl-legend { position: absolute; bottom: 10px; left: 8px; z-index: 5; background: #ffffffee;
+  border-radius: 8px; padding: 6px 10px; font-size: .75rem; border: 1px solid #ddd;
+  max-width: 15rem; max-height: calc(100% - 20px); display: flex; flex-direction: column; }
+.vl-legend-row { display: flex; align-items: center; gap: 6px; min-height: 22px; }
 .vl-legend .vl-line { width: 16px; height: 3px; border-radius: 2px; }
+.vl-legend-head { display: flex; align-items: center; gap: 6px; width: 100%; background: none;
+  border: none; padding: 0; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.vl-legend-head .vl-chip { font-size: .68rem; }
+.vl-legend-caret { margin-left: auto; color: #555; }
+.vl-legend-body { display: flex; flex-direction: column; min-height: 0; margin-top: 4px; }
+.vl-legend-section { display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-top: 6px; padding-top: 4px; border-top: 1px solid #e6e6e6; color: #555;
+  text-transform: uppercase; letter-spacing: .04em; font-size: .65rem; }
+.vl-legend-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.vl-legend-all { display: flex; gap: 6px; }
+.vl-legend-all button { background: none; border: none; padding: 0; font: inherit;
+  color: #2563eb; cursor: pointer; text-transform: none; letter-spacing: 0; }
+/* Fourteen categories over a 55dvh map pane needs a floor of its own. */
+.vl-legend-list { overflow-y: auto; min-height: 0; margin: 2px 0; }
+.vl-legend-list label { cursor: pointer; }
+.vl-legend-list input { margin: 0; cursor: pointer; }
+.vl-legend-source { color: #555; margin-top: 4px; }
 
 .vl-popover { position: absolute; z-index: 10; top: 12px; right: 12px; width: 260px;
   background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px;
