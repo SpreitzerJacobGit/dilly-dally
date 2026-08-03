@@ -21,7 +21,7 @@ const SERVICE_VERBS: Record<string, string> = {
 
 function QuantityModal(props: {
   state: NeedStateView;
-  onSubmit: (req: CheckInRequest) => void;
+  onSubmit: (req: CheckInRequest) => void | Promise<void>;
   onClose: () => void;
 }): JSX.Element {
   const { state } = props;
@@ -78,7 +78,7 @@ function QuantityModal(props: {
               Number(quantity) > state.need.capacity
             }
             onClick={() => {
-              props.onSubmit({ needId: state.need.id, kind: mode, quantity: Number(quantity) });
+              void props.onSubmit({ needId: state.need.id, kind: mode, quantity: Number(quantity) });
               props.onClose();
             }}
           >
@@ -87,7 +87,7 @@ function QuantityModal(props: {
           <button
             className="vl-checkin-btn"
             onClick={() => {
-              props.onSubmit({ needId: state.need.id, kind: "service" });
+              void props.onSubmit({ needId: state.need.id, kind: "service" });
               props.onClose();
             }}
           >
@@ -108,7 +108,8 @@ function QuantityModal(props: {
  */
 export function CheckInBar(props: {
   states: NeedStateView[];
-  onCheckIn: (req: CheckInRequest) => void;
+  /** May be async — the handler stamps the check-in with a free device fix first. */
+  onCheckIn: (req: CheckInRequest) => void | Promise<void>;
   compact?: boolean;
 }): JSX.Element {
   const [modal, setModal] = useState<NeedStateView | null>(null);
@@ -121,7 +122,7 @@ export function CheckInBar(props: {
         <span key={s.need.id} style={{ display: "inline-flex" }}>
           <button
             className={`vl-checkin-btn${s.urgency === "urgent" ? " vl-urgent-btn" : ""}`}
-            onClick={() => props.onCheckIn({ needId: s.need.id, kind: "service" })}
+            onClick={() => void props.onCheckIn({ needId: s.need.id, kind: "service" })}
             title={`Record: full ${s.need.title.toLowerCase()} service`}
           >
             {SERVICE_VERBS[s.need.key] ?? `${s.need.title} done`}

@@ -453,3 +453,25 @@ entities:
       - { name: category, column: category, type: text, notNull: true, unique: true }
       - { name: weight, column: weight, type: real, notNull: true, default: 1 }
       - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+  - id: placeLookups
+    table: place_lookups
+    title: Place lookup
+    description: A remembered geocoder answer, so a place found with an uplink stays findable without one.
+    feature: offline
+    layout: { x: 360, y: 1020 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: kind
+        column: kind
+        type: text
+        notNull: true
+        enum: [search, reverse]
+      - name: queryKey
+        column: query_key
+        type: text
+        notNull: true
+        description: Normalized query - lowercased and collapsed for search, lat/lng rounded to 3dp for reverse.
+      - { name: resultsJson, column: results_json, type: text, notNull: true, semantic: json }
+      - { name: fetchedAt, column: fetched_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: place_lookups_kind_query, fields: [kind, queryKey], unique: true }

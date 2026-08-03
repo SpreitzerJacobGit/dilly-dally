@@ -146,6 +146,15 @@ export const VL_STYLES = `
 .vl-hits { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow-y: auto; }
 .vl-hits button { display: block; width: 100%; text-align: left; font-size: .8rem;
   background: none; border: none; border-bottom: 1px solid #eee; padding: 6px 4px; cursor: pointer; }
+.vl-hits .vl-meta { color: #666; }
+
+/* The place picker: three ways in, all visible at once, because which one can
+   answer depends on the uplink and the permission rather than on the operator. */
+.vl-place-field { display: flex; flex-direction: column; gap: 4px; }
+.vl-place-current { display: flex; align-items: baseline; gap: 6px; font-size: .9rem; }
+.vl-place-pin { flex-shrink: 0; }
+.vl-place-ways { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.vl-place-coords { display: flex; gap: 6px; align-items: flex-end; margin-top: 6px; }
 
 .vl-anchor-detail { border-top: 1px solid #e2e2e2; margin-top: 14px; padding-top: 10px; }
 .vl-anchor-detail h4 { margin: 0 0 6px; }

@@ -6,6 +6,7 @@ import { NeedGauge, daysLeftLabel, type NeedStateView } from "../components/Need
 import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
 import { FormModal } from "../components/FormModal.js";
 import { newClientId } from "../lib/checkinQueue.js";
+import { readGrantedFix } from "../lib/geocode.js";
 import { VL_STYLES } from "../styles.js";
 
 export function NeedsPage(_props: { user: PageUser }): JSX.Element {
@@ -54,8 +55,17 @@ export function NeedsPage(_props: { user: PageUser }): JSX.Element {
   const [rateFormFor, setRateFormFor] = useState<(typeof states)[number] | null>(null);
   const [capacityFormFor, setCapacityFormFor] = useState<(typeof states)[number] | null>(null);
 
-  function handleCheckIn(req: CheckInRequest): void {
-    checkin.mutate({ ...req, clientId: newClientId(), occurredAt: new Date().toISOString() });
+  /** Stamp where we were, when that is free — see readGrantedFix. */
+  async function handleCheckIn(req: CheckInRequest): Promise<void> {
+    const clientId = newClientId();
+    const occurredAt = new Date().toISOString();
+    const fix = await readGrantedFix();
+    checkin.mutate({
+      ...req,
+      clientId,
+      occurredAt,
+      ...(fix ? { location: { lat: fix.lat, lng: fix.lng } } : {}),
+    });
   }
 
   if (needsQ.isLoading) return <p>Loading…</p>;

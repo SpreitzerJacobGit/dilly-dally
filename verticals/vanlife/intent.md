@@ -47,7 +47,8 @@ A trip is an **Origin** and an ordered list of **Targets**. The last Target is t
 `[TRIP-2]` Targets can be added to a trip, reordered, and marked visited or skipped; a visited or skipped Target no longer appears as a stop in newly generated candidates.
 `[TRIP-3]` Exactly one trip is active at a time; the needs outlook, the morning digest, and place refreshing all follow the active trip, and completing a trip archives it with its history intact.
 `[TRIP-4]` The planning screen shows progress toward the final Target and how much of the deviation budget has been spent, and these figures change only as driving is recorded — never by the mere passage of time.
-`[TRIP-5]` An operator can set the current position manually ("we are here"); plans generated afterwards start from that position.
+`[TRIP-5]` An operator can set the current position ("we are here"); plans generated afterwards start from that position.
+`[TRIP-11]` Anywhere a location is chosen — the Origin, the final Target, a Target, or the current position — it can be given as the device's own location, as a city or address searched by name, or as typed coordinates; choosing the device's location names it as a place, and still records the position when it cannot be named.
 `[TRIP-6]` A Target can be given a radius, becoming an area the route must pass through; every generated candidate and its projected continuation enter that area, and the app states which concrete place inside it was chosen, or admits that none was known.
 `[TRIP-7]` An area Target can be narrowed by promoting a place inside it into a nested Target; the narrower one replaces its parent in routing, and removing it restores the parent's broader choice.
 `[TRIP-8]` Any trip can be selected for viewing without activating it, and the selection survives a reload; while a non-active trip is being viewed the application says plainly that needs, check-ins, and the digest still follow the active trip.
@@ -124,6 +125,7 @@ The van server is the source of truth; the internet is optional.
 `[OFF-1]` With no internet connection, the planning screen still shows the current plan, need levels, and map, and plans can still be regenerated — only place refreshing and push delivery degrade, each reporting its state honestly.
 `[OFF-2]` The map never fetches base imagery from a third-party service at runtime — an installation with no internet renders the same map as one with it.
 `[OFF-3]` When route computation is unavailable, the places that can service a need are still listed and ranked by distance, and the added-time figures say plainly that they are estimates rather than routed drive times.
+`[OFF-4]` A place searched for by name once is findable again with no internet connection, and the app says the answer came from memory; when a place has never been looked up and there is no connection, the search says it is unavailable rather than answering that no such place exists, and the device-location and coordinate paths remain open.
 
 ## Seed data on first run
 

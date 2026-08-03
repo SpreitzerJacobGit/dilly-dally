@@ -1,5 +1,6 @@
 import { useState, type JSX } from "react";
 import { GeocodeField } from "../components/GeocodeField.js";
+import { shortPlaceName } from "../lib/geocode.js";
 
 /**
  * Create or edit a trip: its name, its Origin, its final Target, and the pace.
@@ -65,16 +66,14 @@ export function TripEditModal(props: TripEditModalProps): JSX.Element {
 
         <fieldset style={{ border: "1px solid #e5e7eb", borderRadius: 8, margin: "10px 0" }}>
           <legend>Origin</legend>
-          <div style={{ marginBottom: 6 }}>
-            <strong>{v.originName || "not set"}</strong>
-          </div>
           <GeocodeField
-            label="Change the Origin"
+            label={v.originName ? "Change the Origin" : "Set the Origin"}
             placeholder="Portland, OR"
+            value={v.originName || null}
             onPick={(h) => {
               setV((cur) => ({
                 ...cur,
-                originName: h.name.split(",")[0] ?? h.name,
+                originName: shortPlaceName(h.name),
                 origin: { lat: h.lat, lng: h.lng },
               }));
               setOriginSet(true);
@@ -84,16 +83,14 @@ export function TripEditModal(props: TripEditModalProps): JSX.Element {
 
         <fieldset style={{ border: "1px solid #e5e7eb", borderRadius: 8, margin: "10px 0" }}>
           <legend>Final Target</legend>
-          <div style={{ marginBottom: 6 }}>
-            <strong>{v.destName || "not set"}</strong>
-          </div>
           <GeocodeField
-            label="Change the final Target"
+            label={v.destName ? "Change the final Target" : "Set the final Target"}
             placeholder="Las Vegas, NV"
+            value={v.destName || null}
             onPick={(h) => {
               setV((cur) => ({
                 ...cur,
-                destName: h.name.split(",")[0] ?? h.name,
+                destName: shortPlaceName(h.name),
                 dest: { lat: h.lat, lng: h.lng },
               }));
               setDestSet(true);
