@@ -3,10 +3,11 @@
  */
 import type { JSX } from "react";
 import { PlannerPage } from "./pages/PlannerPage.js";
-import { NeedsPage } from "./pages/NeedsPage.js";
+import { StatusesPage } from "./pages/StatusesPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
 import { StatusPage } from "./pages/StatusPage.js";
 import { RedirectHome } from "./pages/RedirectHome.js";
+import { RedirectStatuses } from "./pages/RedirectStatuses.js";
 import { injectInstallMeta } from "./lib/installMeta.js";
 
 export { trpc } from "./trpc.js";
@@ -28,11 +29,13 @@ export interface BespokePage {
 
 export const bespokePages: BespokePage[] = [
   { path: "/", nav: { label: "Plan" }, component: PlannerPage },
-  { path: "/needs", nav: { label: "Needs" }, component: NeedsPage },
+  { path: "/statuses", nav: { label: "Statuses" }, component: StatusesPage },
   { path: "/settings", nav: { label: "Settings" }, component: SettingsPage },
   { path: "/status", nav: { label: "Status" }, component: StatusPage },
   // The map, anchors and trip screens became one; their routes still land.
   { path: "/plan", nav: null, component: RedirectHome },
   { path: "/anchors", nav: null, component: RedirectHome },
   { path: "/trip", nav: null, component: RedirectHome },
+  // The needs screen grew into the statuses manager and took its route with it.
+  { path: "/needs", nav: null, component: RedirectStatuses },
 ];

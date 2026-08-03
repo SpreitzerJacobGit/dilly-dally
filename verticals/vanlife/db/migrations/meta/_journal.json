@@ -19,8 +19,15 @@
     {
       "idx": 2,
       "version": "6",
-      "when": 1785600000000,
-      "tag": "0002_lookup_memory",
+      "when": 1785614400000,
+      "tag": "0002_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785789643003,
+      "tag": "0003_lookup_memory",
       "breakpoints": true
     }
   ]

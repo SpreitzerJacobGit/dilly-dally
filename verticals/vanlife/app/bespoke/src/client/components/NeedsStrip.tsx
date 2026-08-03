@@ -11,6 +11,10 @@ export interface NeedStateView {
     routingDriver: boolean;
     /** Which place category services this need; null for checklist-only concerns. */
     poiCategory: string | null;
+    /** "level" = a consumable with a capacity; "date" = simply due on a day. */
+    trackingMode: string;
+    dueAt: string | null;
+    active: boolean;
   };
   level: number;
   runway: number;
@@ -20,6 +24,10 @@ export interface NeedStateView {
   asOf: string;
 }
 
+export function isDateTracked(s: NeedStateView): boolean {
+  return s.need.trackingMode === "date";
+}
+
 export function daysLeftLabel(deadlineAt: string | null): string {
   if (!deadlineAt) return "—";
   const days = (Date.parse(deadlineAt) - Date.now()) / 86_400_000;
@@ -27,19 +35,43 @@ export function daysLeftLabel(deadlineAt: string | null): string {
   return days < 1 ? `${String(Math.round(days * 24))}h` : `${days.toFixed(1)}d`;
 }
 
+/** "Sep 15" / "Sep 15 2027" — the day itself, which is what a due date means. */
+export function dueDateLabel(dueAt: string | null): string {
+  if (!dueAt) return "not scheduled";
+  const d = new Date(dueAt);
+  const sameYear = d.getUTCFullYear() === new Date().getUTCFullYear();
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** The one-line summary under a gauge, which differs by how the need is tracked. */
+export function gaugeSummary(s: NeedStateView): string {
+  if (isDateTracked(s)) {
+    return s.need.dueAt ? `due ${dueDateLabel(s.need.dueAt)} · ${daysLeftLabel(s.deadlineAt)}` : "not scheduled";
+  }
+  return s.need.routingDriver
+    ? `${String(s.runway)} ${s.need.unit} · ${daysLeftLabel(s.deadlineAt)}`
+    : "checklist";
+}
+
 export function NeedGauge(props: { state: NeedStateView; onClick?: () => void }): JSX.Element {
   const { state } = props;
   const cls = state.urgency === "urgent" ? "vl-urgent" : state.urgency === "warn" ? "vl-warn" : "vl-ok";
+  const title = isDateTracked(state)
+    ? `${state.need.title}: ${state.need.dueAt ? `due ${dueDateLabel(state.need.dueAt)}` : "no due date set"}`
+    : `${state.need.title}: estimated ${String(state.level)} ${state.need.unit} as of ${state.asOf.slice(11, 16)}`;
   return (
-    <div className="vl-gauge" onClick={props.onClick} role="button" title={`${state.need.title}: estimated ${String(state.level)} ${state.need.unit} as of ${state.asOf.slice(11, 16)}`}>
+    <div className="vl-gauge" onClick={props.onClick} role="button" title={title}>
       <div style={{ fontSize: ".8rem", fontWeight: 600 }}>{state.need.title}</div>
       <div className="vl-gauge-bar">
         <div className={`vl-gauge-fill ${cls}`} style={{ width: `${String(Math.round(state.runwayRatio * 100))}%` }} />
       </div>
       <small>
-        {state.need.routingDriver
-          ? `${String(state.runway)} ${state.need.unit} · ${daysLeftLabel(state.deadlineAt)}`
-          : "checklist"}
+        {gaugeSummary(state)}
         {state.urgency !== "ok" ? ` · ${state.urgency.toUpperCase()}` : ""}
       </small>
     </div>
@@ -59,6 +91,9 @@ export function canSearchStops(s: NeedStateView): boolean {
   return s.need.routingDriver && s.need.poiCategory !== null;
 }
 
+/** Where a gauge click lands when it is not a stop search. */
+export const STATUSES_PATH = "/statuses";
+
 export function NeedsStrip(props: {
   states: NeedStateView[];
   /** Given, a routing need opens the stop search instead of the needs screen. */
@@ -75,7 +110,7 @@ export function NeedsStrip(props: {
           onClick={() =>
             props.onNeedSearch && canSearchStops(s)
               ? props.onNeedSearch(s)
-              : void navigate("/needs")
+              : void navigate(STATUSES_PATH)
           }
         />
       ))}

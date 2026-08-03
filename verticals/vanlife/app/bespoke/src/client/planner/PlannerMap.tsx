@@ -1,8 +1,8 @@
 import type { JSX } from "react";
 import { MapView } from "../map/MapView.js";
 import type { CandidateRouteView, MapOriginView, MapPoiView, MapTargetView } from "../map/types.js";
-import { ROLE_LABELS, roleColor, PROJECTED_COLOR } from "../map/palette.js";
 import { DigestBanner, type DigestView } from "../components/DigestBanner.js";
+import { MapLegend } from "./MapLegend.js";
 
 /**
  * The map pane: the map itself plus the three things that overlay it.
@@ -23,6 +23,12 @@ export interface PlannerMapProps {
   poiSourceLabel: string;
   /** Lowered when the dots are a small deliberate set rather than the catalog. */
   poiMinZoom?: number;
+  /** Place categories switched off in the legend. Empty means everything shows. */
+  hiddenCategories: Set<string>;
+  /** False while the dots are a search result or a Target's suggestions. */
+  poisFilterable: boolean;
+  onToggleCategory: (category: string) => void;
+  onSetAllCategories: (visible: boolean) => void;
   position: { lat: number; lng: number } | null;
   origin: MapOriginView | null;
   targets: MapTargetView[];
@@ -60,6 +66,7 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         highlightedId={props.highlightedId}
         pois={props.pois}
         poiMinZoom={props.poiMinZoom}
+        hiddenCategories={props.poisFilterable ? props.hiddenCategories : undefined}
         position={props.position}
         origin={props.origin}
         targets={props.targets}
@@ -77,17 +84,13 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         heightStyle="100%"
       />
 
-      <div className="vl-legend">
-        {Object.entries(ROLE_LABELS).map(([tier, label]) => (
-          <div key={tier}>
-            <span className="vl-line" style={{ background: roleColor(tier) }} /> {label}
-          </div>
-        ))}
-        <div>
-          <span className="vl-line" style={{ background: PROJECTED_COLOR }} /> Projected future
-        </div>
-        <div style={{ marginTop: 4, color: "#555" }}>{props.poiSourceLabel}</div>
-      </div>
+      <MapLegend
+        hidden={props.hiddenCategories}
+        filterable={props.poisFilterable}
+        poiSourceLabel={props.poiSourceLabel}
+        onToggle={props.onToggleCategory}
+        onSetAll={props.onSetAllCategories}
+      />
 
       {props.detail}
     </div>

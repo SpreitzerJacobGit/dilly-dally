@@ -3,13 +3,17 @@ import { useState, type JSX } from "react";
 export interface FieldSpec {
   name: string;
   label: string;
-  type?: "text" | "number" | "password" | "textarea";
+  type?: "text" | "number" | "password" | "textarea" | "date" | "select";
   placeholder?: string;
   defaultValue?: string;
   min?: number;
   max?: number;
   step?: string;
   required?: boolean;
+  /** For type "select" — a closed set beats a free-text field the server must reject. */
+  options?: { value: string; label: string }[];
+  /** Shown under the field; for explaining what a threshold or interval means. */
+  hint?: string;
 }
 
 /**
@@ -61,6 +65,18 @@ export function FormModal(props: {
                 onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
                 style={{ display: "block", width: "100%", padding: 6, marginTop: 4, fontFamily: "monospace" }}
               />
+            ) : f.type === "select" ? (
+              <select
+                value={values[f.name] ?? ""}
+                onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+                style={{ display: "block", width: "100%", padding: 6, marginTop: 4 }}
+              >
+                {(f.options ?? []).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             ) : (
               <input
                 type={f.type ?? "text"}
@@ -73,6 +89,9 @@ export function FormModal(props: {
                 style={{ display: "block", width: "100%", padding: 6, marginTop: 4 }}
               />
             )}
+            {f.hint ? (
+              <span style={{ display: "block", color: "#666", fontSize: ".75rem", marginTop: 2 }}>{f.hint}</span>
+            ) : null}
           </label>
         ))}
         {error ? <p style={{ color: "#b3261e", fontSize: ".85rem" }}>{error}</p> : null}

@@ -99,11 +99,78 @@ export const checkInSchema = z.object({
   occurredAt: z.iso.datetime().optional(),
 });
 
+export const trackingModeSchema = z.enum(["level", "date"]);
+
+/**
+ * A due date may be given as a bare day, which is how a date input reports it.
+ * A bare day means the END of that day — a need due on the 15th is not overdue
+ * at breakfast on the 15th.
+ */
+export const dueAtSchema = z
+  .union([z.iso.date(), z.iso.datetime()])
+  .transform((v) => (v.length === 10 ? `${v}T23:59:59.000Z` : v));
+
+/**
+ * Creating a need. The two tracking modes need disjoint fields — a consumable
+ * has a capacity and a rate, a date-tracked concern has a due date and lead
+ * times — so the shared object validates whichever set the mode calls for.
+ */
+export const needCreateSchema = z
+  .object({
+    title: z.string().min(1).max(60),
+    unit: z.string().min(1).max(20).default("units"),
+    trackingMode: trackingModeSchema.default("level"),
+    poiCategory: z.string().max(40).nullable().default(null),
+    routingDriver: z.boolean().optional(),
+    // Level mode.
+    capacity: z.number().positive().optional(),
+    direction: z.enum(["depletes", "accumulates"]).default("depletes"),
+    warnRatio: z.number().min(0).max(0.9).default(0.25),
+    urgentRatio: z.number().min(0).max(0.5).default(0.1),
+    ratePerDay: z.number().min(0).default(0),
+    ratePerMile: z.number().min(0).default(0),
+    // Date mode.
+    dueAt: dueAtSchema.optional(),
+    warnDays: z.number().min(0).max(3650).optional(),
+    urgentDays: z.number().min(0).max(3650).optional(),
+    serviceIntervalDays: z.number().min(0).max(3650).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.trackingMode === "level" && (v.capacity === undefined || v.capacity <= 0)) {
+      ctx.addIssue({ code: "custom", path: ["capacity"], message: "A level-tracked need needs a capacity" });
+    }
+    if (v.trackingMode === "date" && v.dueAt === undefined) {
+      ctx.addIssue({ code: "custom", path: ["dueAt"], message: "A date-tracked need needs a due date" });
+    }
+    if (v.urgentRatio > v.warnRatio) {
+      ctx.addIssue({ code: "custom", path: ["urgentRatio"], message: "Urgent must be at or below warn" });
+    }
+    if (v.warnDays !== undefined && v.urgentDays !== undefined && v.urgentDays > v.warnDays) {
+      ctx.addIssue({ code: "custom", path: ["urgentDays"], message: "Urgent must fall at or after warn" });
+    }
+  });
+
+/**
+ * Editing a need. Every field is optional because rename, retune, re-mode and
+ * archive are all separate gestures in the manager and never arrive together.
+ * The mode-consistency checks that need the stored row live in the route.
+ */
 export const needConfigureSchema = z.object({
   needId: z.number().int(),
+  title: z.string().min(1).max(60).optional(),
+  unit: z.string().min(1).max(20).optional(),
+  trackingMode: trackingModeSchema.optional(),
   capacity: z.number().positive().optional(),
+  direction: z.enum(["depletes", "accumulates"]).optional(),
   warnRatio: z.number().min(0).max(0.9).optional(),
   urgentRatio: z.number().min(0).max(0.5).optional(),
+  dueAt: dueAtSchema.nullable().optional(),
+  warnDays: z.number().min(0).max(3650).nullable().optional(),
+  urgentDays: z.number().min(0).max(3650).nullable().optional(),
+  serviceIntervalDays: z.number().min(0).max(3650).nullable().optional(),
+  poiCategory: z.string().max(40).nullable().optional(),
+  routingDriver: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(999).optional(),
   active: z.boolean().optional(),
 });
 

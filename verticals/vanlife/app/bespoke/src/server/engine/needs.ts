@@ -32,6 +32,12 @@ export interface NeedRow {
   routingDriver: boolean;
   sortOrder: number;
   active: boolean;
+  /** "level" = consumable with a capacity and a rate; "date" = simply due on a day. */
+  trackingMode: string;
+  dueAt: string | null;
+  warnDays: number | null;
+  urgentDays: number | null;
+  serviceIntervalDays: number | null;
 }
 
 export interface CheckInEvent {
@@ -141,6 +147,70 @@ export function runwayUrgency(
   return state.status === "ok" ? "ok" : "warn";
 }
 
+/** Lead times a date-tracked need falls back on when it names none of its own. */
+export const DEFAULT_WARN_DAYS = 14;
+export const DEFAULT_URGENT_DAYS = 3;
+
+/**
+ * Date-tracked needs — an oil change, a registration renewal — have no capacity
+ * and no drain. They are simply due on a day, so their "runway" is the days left
+ * until that day. Expressing them in the same runway/urgency/deadline vocabulary
+ * as consumables is what lets one gauge, one sort, and one digest serve both.
+ */
+export function deriveDateState(
+  need: Pick<NeedRow, "dueAt" | "warnDays" | "urgentDays" | "serviceIntervalDays">,
+  nowIso: string,
+): { level: number; runway: number; runwayRatio: number; urgency: NeedUrgency; deadlineAt: string | null } {
+  // No due date is nothing scheduled, not something overdue: an empty bar, but calm.
+  if (!need.dueAt) {
+    return { level: 0, runway: 0, runwayRatio: 0, urgency: "ok", deadlineAt: null };
+  }
+  const warnDays = need.warnDays ?? DEFAULT_WARN_DAYS;
+  const urgentDays = need.urgentDays ?? DEFAULT_URGENT_DAYS;
+  const runway = Math.max(0, (Date.parse(need.dueAt) - Date.parse(nowIso)) / MS_PER_DAY);
+  // Fill the bar against the whole service interval when there is one, so a need
+  // freshly serviced reads full rather than merely "not warned yet".
+  const span = need.serviceIntervalDays ?? warnDays * 2;
+  const urgency: NeedUrgency = runway <= urgentDays ? "urgent" : runway <= warnDays ? "warn" : "ok";
+  return {
+    level: round2(runway),
+    runway: round2(runway),
+    runwayRatio: span > 0 ? round2(Math.min(1, runway / span)) : 0,
+    urgency,
+    deadlineAt: need.dueAt,
+  };
+}
+
+/**
+ * A stable slug for an operator-created need. The key is what the check-in
+ * verbs and the seed fixtures address needs by, so it stays a slug rather than
+ * becoming the title — and it must not move when the title is later edited.
+ * Collisions take a numeric suffix rather than being rejected, since a second
+ * need called "Propane" is a reasonable thing to want.
+ */
+export function slugifyKey(title: string, taken: Set<string>): string {
+  const base =
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "need";
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) {
+    const candidate = `${base}-${String(i)}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** Where a service check-in moves a date-tracked need's due date. */
+export function rollDueDate(
+  need: Pick<NeedRow, "serviceIntervalDays">,
+  servicedAtIso: string,
+): string | null {
+  if (need.serviceIntervalDays === null || need.serviceIntervalDays <= 0) return null;
+  return new Date(Date.parse(servicedAtIso) + need.serviceIntervalDays * MS_PER_DAY).toISOString();
+}
+
 /** Projected runway after `etaMinutes` of elapsed time and `miles` of driving. */
 export function projectRunway(
   runway: number,
@@ -237,12 +307,12 @@ export async function loadNeedStates(
   db: Db,
   tripId: number | null,
   nowIso: string,
+  /** Archived needs are hidden from every planning reader; only the manager asks for them. */
+  includeArchived = false,
 ): Promise<NeedState[]> {
-  const needRows = (await db
-    .select()
-    .from(needs)
-    .where(eq(needs.active, true))
-    .orderBy(asc(needs.sortOrder))) as NeedRow[];
+  const needRows = (await (includeArchived
+    ? db.select().from(needs).orderBy(asc(needs.sortOrder))
+    : db.select().from(needs).where(eq(needs.active, true)).orderBy(asc(needs.sortOrder)))) as NeedRow[];
 
   const allEvents = await db
     .select({
@@ -279,6 +349,21 @@ export async function loadNeedStates(
       ratePerMile: latestRate?.ratePerMile ?? 0,
       source: latestRate?.source ?? "manual",
     };
+    // Date-tracked needs have no capacity to drain and no rate to refine, so they
+    // skip the consumption model entirely — but return the same shape, which is why
+    // candidates, the digest and the gauges need no idea the two kinds differ. A
+    // zero rate is also what keeps them out of the service-stop loop in candidates.
+    if (need.trackingMode === "date") {
+      const dateState = deriveDateState(need, nowIso);
+      return {
+        need,
+        rate: { ratePerDay: 0, ratePerMile: 0, source: rate.source },
+        ...dateState,
+        asOf: nowIso,
+        lastCheckInAt: events.at(-1)?.occurredAt ?? null,
+        suggestion: null,
+      };
+    }
     const { level, runway } = deriveRunway(need, events, rate, nowIso, milesBetween);
     return {
       need,

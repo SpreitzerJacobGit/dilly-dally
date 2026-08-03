@@ -24,15 +24,19 @@ A trip is an **Origin** and an ordered list of **Targets**. The last Target is t
 
 ## Recurring needs & levels {#needs}
 
-Every recurring need is tracked as an estimated level with a capacity, a consumption rate, and a threshold. Estimates are honest about being estimates.
+Every recurring need is tracked one of two ways: as an estimated level with a capacity, a consumption rate, and a threshold; or as a date it falls due. Estimates are honest about being estimates.
 
-`[NEED-1]` The needs screen lists every tracked need with its unit, capacity, current estimated level, consumption rate, and projected time until it runs dry or overflows.
+`[NEED-1]` The statuses screen lists every tracked need with its unit, capacity, current estimated level, consumption rate, and projected time until it runs dry or overflows.
 `[NEED-2]` A need's displayed level is always labeled as an estimate with the time it was computed from, and is derived from the last check-in, the configured rate, and elapsed time and recorded miles — the application never presents it as a measured value.
 `[NEED-3]` A need projected to run dry or overflow before its next planned service stop is flagged as urgent everywhere it appears.
 `[NEED-4]` Editing a need's capacity, rate, or threshold immediately changes every projection; the application may suggest a refined rate derived from check-in history, and a suggestion never applies itself — an operator must accept it.
-`[NEED-5]` Work internet appears as a tracked concern on the needs screen but never generates route stops — it is a checklist item, not a routing driver.
+`[NEED-5]` Work internet appears as a tracked concern on the statuses screen but never generates route stops — it is a checklist item, not a routing driver.
 `[NEED-6]` Tapping a tracked need that drives routing lists the places that can service it, each showing how far it is from the current position and how many minutes it would add to today's chosen route, orderable by either measure; the list is drawn from places already stored on the van server, so it works with no internet.
 `[NEED-7]` Adding a place from that list pins it for the trip and regenerates the day's candidates so it appears as a stop wherever it is feasible; a place already pinned is shown as pinned and can be released from the same row.
+`[NEED-8]` The statuses screen has a default view for reading levels and recording check-ins, and an edit mode that manages the tracked set itself; creation, renaming, retuning, archiving and deletion live only in edit mode, so none of them can be reached by a mistap on the daily screen.
+`[NEED-9]` A need is tracked either by level — a capacity that drains at a rate — or by date, meaning it simply falls due on a day with no capacity and no drain; either mode can be created directly, and an existing need can be switched between them without losing its check-in history.
+`[NEED-10]` A date-tracked need becomes warn and then urgent a configurable number of days before it falls due, and never generates route stops on its own; when it names a repeat interval, a check-in rolls its due date forward by that interval, and undoing that check-in rolls it back.
+`[NEED-11]` A need is archived rather than deleted by default: archiving hides it from every screen and projection while keeping its history, and it can be restored. Permanent deletion, which also removes every check-in and rate recorded against it, is offered only for an already-archived need and only behind a confirmation that names what is lost.
 
 ## Check-ins {#checkins}
 

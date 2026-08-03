@@ -14,6 +14,7 @@ const VIEWED_TRIP = "vl.viewedTripId";
 const DIGEST_DISMISSED = (userKey: string): string => `vl.digestDismissed.${userKey}`;
 /** Check-ins recorded with no uplink, waiting to be replayed. */
 export const CHECKIN_QUEUE_KEY = "vl.checkinQueue";
+const POI_CATEGORIES_HIDDEN = "vl.poiCategoriesHidden";
 
 function read(key: string): string | null {
   try {
@@ -51,4 +52,27 @@ export function readDigestDismissed(userKey: string): string | null {
 
 export function writeDigestDismissed(userKey: string, date: string): void {
   write(DIGEST_DISMISSED(userKey), date);
+}
+
+/**
+ * Which place categories the legend has switched off.
+ *
+ * Stored as the hidden set rather than the visible one so a category added to
+ * the palette later defaults to visible — the other way round it would arrive
+ * silently switched off for everyone who has ever touched the filter.
+ */
+export function readHiddenPoiCategories(): Set<string> {
+  const raw = read(POI_CATEGORIES_HIDDEN);
+  if (raw === null) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((c): c is string => typeof c === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeHiddenPoiCategories(hidden: Set<string>): void {
+  write(POI_CATEGORIES_HIDDEN, hidden.size === 0 ? null : JSON.stringify([...hidden]));
 }

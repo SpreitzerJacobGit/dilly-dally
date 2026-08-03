@@ -164,7 +164,7 @@ entities:
   - id: needs
     table: needs
     title: Recurring need
-    description: A tracked van-life need with capacity, thresholds, and its servicing place category.
+    description: A tracked van-life need, tracked either as a consumable level or as a due date.
     feature: needs
     layout: { x: 60, y: 380 }
     fields:
@@ -174,7 +174,10 @@ entities:
         type: text
         notNull: true
         unique: true
-        enum: [food, gas, water, laundry, trash, wastewater, electric, internet]
+        description: >-
+          Stable slug. The eight seeded keys are food, gas, water, laundry, trash,
+          wastewater, electric and internet; operator-created needs get a slug derived
+          from their title, so this is not a closed set.
       - { name: title, column: title, type: text, notNull: true }
       - { name: unit, column: unit, type: text, notNull: true }
       - { name: capacity, column: capacity, type: real, notNull: true }
@@ -208,6 +211,35 @@ entities:
         description: Internet is tracked but never generates stops.
       - { name: sortOrder, column: sort_order, type: integer, notNull: true }
       - { name: active, column: active, type: boolean, notNull: true, default: true }
+      - name: trackingMode
+        column: tracking_mode
+        type: text
+        notNull: true
+        default: level
+        enum: [level, date]
+        description: >-
+          level: a consumable with a capacity and a rate, whose level is derived from
+          the check-in log. date: a concern that is simply due on a day — oil change,
+          registration, insurance — with no capacity and no drain.
+      - name: dueAt
+        column: due_at
+        type: text
+        semantic: iso-datetime
+        description: When a date-tracked need falls due. Null for level-tracked needs.
+      - name: warnDays
+        column: warn_days
+        type: real
+        description: Days before dueAt at which a date-tracked need is worth planning for.
+      - name: urgentDays
+        column: urgent_days
+        type: real
+        description: Days before dueAt at which a date-tracked need is urgent.
+      - name: serviceIntervalDays
+        column: service_interval_days
+        type: real
+        description: >-
+          How far a service check-in rolls dueAt forward. Null means the due date is
+          only ever set by hand.
   - id: needRates
     table: need_rates
     title: Consumption rate
@@ -270,6 +302,13 @@ entities:
         type: text
         unique: true
         description: Client-generated id so an offline queue replay never records twice.
+      - name: prevDueAt
+        column: prev_due_at
+        type: text
+        semantic: iso-datetime
+        description: >-
+          The due date this check-in rolled forward, recorded so undoing it restores
+          the previous date exactly rather than guessing it back from the interval.
       - { name: occurredAt, column: occurred_at, type: text, notNull: true, semantic: iso-datetime }
       - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
     indexes:

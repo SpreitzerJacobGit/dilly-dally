@@ -97,6 +97,12 @@ export interface MapViewProps {
    * actually visible.
    */
   poiMinZoom?: number;
+  /**
+   * Place categories to hide. Undefined applies no filter at all, which is
+   * what a caller showing a small deliberate set wants — those places were
+   * asked for by name and must not be silently withheld.
+   */
+  hiddenCategories?: Set<string>;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;
