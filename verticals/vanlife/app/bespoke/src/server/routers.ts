@@ -35,12 +35,13 @@ import {
   bboxSchema,
   checkInSchema,
   needConfigureSchema,
+  needCreateSchema,
   needOptionsSchema,
   rateSetSchema,
   tripCreateSchema,
   tripUpdateSchema,
 } from "./schemas.js";
-import { checkInHistory, loadNeedStates } from "./engine/needs.js";
+import { checkInHistory, loadNeedStates, rollDueDate, slugifyKey } from "./engine/needs.js";
 import {
   budgetUsage,
   buildDailyCandidates,
@@ -768,11 +769,75 @@ export const planRouter = router({
 });
 
 export const needsRouter = router({
-  list: op.query(async ({ ctx }) => {
-    const db = ctx.dbHandle.db;
-    const trip = await activeTrip(db);
-    return loadNeedStates(db, trip?.id ?? null, nowIso());
-  }),
+  list: op
+    .input(z.object({ includeArchived: z.boolean().default(false) }).default({ includeArchived: false }))
+    .query(async ({ ctx, input }) => {
+      const db = ctx.dbHandle.db;
+      const trip = await activeTrip(db);
+      return loadNeedStates(db, trip?.id ?? null, nowIso(), input.includeArchived);
+    }),
+
+  create: op.input(needCreateSchema).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const existing = await db.select({ key: needs.key, sortOrder: needs.sortOrder }).from(needs);
+      const key = slugifyKey(input.title, new Set(existing.map((n) => n.key)));
+      const sortOrder = existing.reduce((max, n) => Math.max(max, n.sortOrder), 0) + 1;
+      const dateTracked = input.trackingMode === "date";
+      const inserted = await db
+        .insert(needs)
+        .values({
+          key,
+          title: input.title,
+          // A date-tracked need counts down in days; capacity and direction are
+          // inert for it, but the columns are NOT NULL for every other reader.
+          unit: dateTracked ? "days" : input.unit,
+          capacity: dateTracked ? 1 : (input.capacity ?? 1),
+          direction: dateTracked ? "depletes" : input.direction,
+          warnRatio: input.warnRatio,
+          urgentRatio: input.urgentRatio,
+          poiCategory: input.poiCategory,
+          // Date-tracked needs never generate stops unless asked to, and a need
+          // with no place category could not service one anyway.
+          routingDriver: input.routingDriver ?? (!dateTracked && input.poiCategory !== null),
+          sortOrder,
+          active: true,
+          trackingMode: input.trackingMode,
+          dueAt: input.dueAt ?? null,
+          warnDays: input.warnDays ?? null,
+          urgentDays: input.urgentDays ?? null,
+          serviceIntervalDays: input.serviceIntervalDays ?? null,
+        })
+        .returning({ id: needs.id });
+      const needId = inserted[0]!.id;
+      if (!dateTracked && (input.ratePerDay > 0 || input.ratePerMile > 0)) {
+        await db.insert(needRates).values({
+          needId,
+          ratePerDay: input.ratePerDay,
+          ratePerMile: input.ratePerMile,
+          source: "manual",
+          effectiveFrom: nowIso(),
+          note: null,
+          createdAt: nowIso(),
+        });
+      }
+      return { id: needId, key };
+    }),
+  ),
+
+  /**
+   * Permanent deletion, which cascades away every check-in and rate row. Gated
+   * on the need already being archived so the destructive step is always the
+   * second one — archiving is the reversible answer to "get this off my screen".
+   */
+  remove: op.input(z.object({ needId: z.number().int() })).mutation(
+    intakeWrite(async ({ db, input }) => {
+      const need = (await db.select().from(needs).where(eq(needs.id, input.needId)))[0];
+      if (!need) rejectIntake("Need not found");
+      if (need.active) rejectIntake(`Archive ${need.title} before deleting it permanently`);
+      await db.delete(needs).where(eq(needs.id, input.needId));
+      return { id: input.needId };
+    }),
+  ),
 
   history: op
     .input(z.object({ needId: z.number().int(), limit: z.number().int().max(200).default(50) }))
@@ -782,10 +847,13 @@ export const needsRouter = router({
     intakeWrite(async ({ db, input, ctx }) => {
       const need = (await db.select().from(needs).where(eq(needs.id, input.needId)))[0];
       if (!need) rejectIntake("Need not found");
+      const dateTracked = need.trackingMode === "date";
       if (input.kind === "set-level" && input.quantity === undefined) {
         rejectIntake("A set-level correction needs a level");
       }
-      if (input.quantity !== undefined && input.quantity > need.capacity * 1.5) {
+      // A date-tracked need has no capacity, so the plausibility ceiling is
+      // meaningless for it — its check-ins carry no quantity at all.
+      if (!dateTracked && input.quantity !== undefined && input.quantity > need.capacity * 1.5) {
         rejectIntake(`Quantity exceeds ${need.title}'s capacity by too much to be plausible`);
       }
       if (input.clientId) {
@@ -795,6 +863,12 @@ export const needsRouter = router({
           .where(eq(checkIns.clientId, input.clientId));
         if (dupe[0]) return { id: dupe[0].id, deduped: true };
       }
+      const occurredAt = input.occurredAt ?? nowIso();
+      // Servicing a date-tracked need is what moves its due date: oil changed
+      // today, due again one interval from today (never one interval from when
+      // it was DUE, or servicing early would compound). With no interval
+      // configured the due date only ever moves by hand.
+      const rolled = dateTracked && input.kind === "service" ? rollDueDate(need, occurredAt) : null;
       const inserted = await db
         .insert(checkIns)
         .values({
@@ -807,18 +881,31 @@ export const needsRouter = router({
           poiId: input.poiId ?? null,
           recordedBy: ctx.user.id,
           clientId: input.clientId ?? null,
-          occurredAt: input.occurredAt ?? nowIso(),
+          // Recorded, not recomputed: the roll forward is measured from the
+          // service date, so subtracting the interval later would NOT give the
+          // date back. Only the old value can restore the old value.
+          prevDueAt: rolled ? need.dueAt : null,
+          occurredAt,
           createdAt: nowIso(),
         })
         .returning({ id: checkIns.id });
+      if (rolled) await db.update(needs).set({ dueAt: rolled }).where(eq(needs.id, need.id));
       return { id: inserted[0]!.id, deduped: false };
     }),
   ),
 
   undoCheckin: op.input(z.object({ id: z.number().int() })).mutation(
     intakeWrite(async ({ db, input }) => {
-      const deleted = await db.delete(checkIns).where(eq(checkIns.id, input.id)).returning({ id: checkIns.id });
-      if (deleted.length === 0) rejectIntake("Check-in not found");
+      const row = (await db.select().from(checkIns).where(eq(checkIns.id, input.id)))[0];
+      if (!row) rejectIntake("Check-in not found");
+      await db.delete(checkIns).where(eq(checkIns.id, input.id));
+      // Undoing a level check-in needs no repair — the level is re-derived from
+      // whatever is left of the log. A date-tracked need STORES its due date, so
+      // the roll forward this check-in caused has to be put back, and only the
+      // date it recorded can do that.
+      if (row.prevDueAt) {
+        await db.update(needs).set({ dueAt: row.prevDueAt }).where(eq(needs.id, row.needId));
+      }
       return { id: input.id };
     }),
   ),
@@ -826,8 +913,23 @@ export const needsRouter = router({
   configure: op.input(needConfigureSchema).mutation(
     intakeWrite(async ({ db, input }) => {
       const { needId, ...fields } = input;
-      const updated = await db.update(needs).set(fields).where(eq(needs.id, needId)).returning({ id: needs.id });
-      if (updated.length === 0) rejectIntake("Need not found");
+      const need = (await db.select().from(needs).where(eq(needs.id, needId)))[0];
+      if (!need) rejectIntake("Need not found");
+      // A need cannot be left half-converted: switching to date tracking without
+      // ever naming a due date would leave it permanently unscheduled, and
+      // switching back to a level without a capacity would make it undrainable.
+      const mode = fields.trackingMode ?? need.trackingMode;
+      if (mode === "date") {
+        const dueAt = fields.dueAt !== undefined ? fields.dueAt : need.dueAt;
+        if (!dueAt) rejectIntake(`${need.title} needs a due date to be tracked by date`);
+      } else if (mode === "level") {
+        const capacity = fields.capacity ?? need.capacity;
+        if (!capacity || capacity <= 0) rejectIntake(`${need.title} needs a capacity to be tracked by level`);
+      }
+      const warnRatio = fields.warnRatio ?? need.warnRatio;
+      const urgentRatio = fields.urgentRatio ?? need.urgentRatio;
+      if (urgentRatio > warnRatio) rejectIntake("The urgent threshold must sit at or below the warn threshold");
+      await db.update(needs).set(fields).where(eq(needs.id, needId));
       return { id: needId };
     }),
   ),
