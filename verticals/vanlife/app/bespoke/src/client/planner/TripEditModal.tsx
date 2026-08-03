@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { GeocodeField } from "../components/GeocodeField.js";
 import { shortPlaceName } from "../lib/geocode.js";
 
@@ -26,6 +26,8 @@ export interface TripEditValues {
 export interface TripEditModalProps {
   mode: "create" | "edit";
   initial: TripEditValues | null;
+  /** What a new trip starts at, from Settings. Ignored when editing. */
+  defaultDailyDriveHours?: number;
   /** Warns before an edit that will reset the frozen baseline. */
   hasBaseline: boolean;
   busy: boolean;
@@ -44,10 +46,20 @@ const BLANK: TripEditValues = {
 };
 
 export function TripEditModal(props: TripEditModalProps): JSX.Element {
-  const start = props.initial ?? BLANK;
+  const start =
+    props.initial ?? { ...BLANK, dailyDriveHours: props.defaultDailyDriveHours ?? BLANK.dailyDriveHours };
   const [v, setV] = useState<TripEditValues>(start);
   const [originSet, setOriginSet] = useState(props.mode === "edit");
   const [destSet, setDestSet] = useState(props.mode === "edit");
+  const [paceTouched, setPaceTouched] = useState(false);
+
+  // The operator's default can land after this form opens — the very first trip
+  // opens it on page load. Adopt it until someone types their own number.
+  const { mode, defaultDailyDriveHours } = props;
+  useEffect(() => {
+    if (mode !== "create" || paceTouched || defaultDailyDriveHours === undefined) return;
+    setV((cur) => ({ ...cur, dailyDriveHours: defaultDailyDriveHours }));
+  }, [mode, paceTouched, defaultDailyDriveHours]);
 
   const movedOrigin = v.origin.lat !== start.origin.lat || v.origin.lng !== start.origin.lng;
   const movedDest = v.dest.lat !== start.dest.lat || v.dest.lng !== start.dest.lng;
@@ -105,7 +117,10 @@ export function TripEditModal(props: TripEditModalProps): JSX.Element {
             min={1}
             max={12}
             value={v.dailyDriveHours}
-            onChange={(e) => setV({ ...v, dailyDriveHours: Number(e.target.value) })}
+            onChange={(e) => {
+              setPaceTouched(true);
+              setV({ ...v, dailyDriveHours: Number(e.target.value) });
+            }}
             style={{ width: "100%" }}
           />
         </label>

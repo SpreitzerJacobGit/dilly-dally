@@ -48,10 +48,12 @@ import {
   budgetUsage,
   buildDailyCandidates,
   currentPosition,
+  dayDriveHours,
   ensureBaseline,
   persistCandidates,
   planDateOf,
   planStateFingerprint,
+  setDayDriveHours,
   storedPlanFingerprint,
   type CandidateWarning,
   type TripRow,
@@ -73,7 +75,14 @@ import {
   subtreeIds,
 } from "./engine/anchors.js";
 import { osrmRoute, OsrmUnavailableError } from "./engine/osrm.js";
-import { applyTripUpdate, deleteTrip, shouldPushWarnings } from "./engine/trips.js";
+import {
+  applyTripUpdate,
+  deleteTrip,
+  planningSettings,
+  PLANNING_SETTINGS_KEY,
+  PlanningSettingsSchema,
+  shouldPushWarnings,
+} from "./engine/trips.js";
 import { buildTargetViews } from "./engine/targets.js";
 import {
   composeDigest,
@@ -106,6 +115,24 @@ export const tripsRouter = router({
 
   active: op.query(async ({ ctx }) => activeTrip(ctx.dbHandle.db)),
 
+  /** What a new trip starts at. Existing trips keep the pace they were given. */
+  defaults: op.query(async ({ ctx }) => planningSettings(ctx.dbHandle.db)),
+
+  saveDefaults: op
+    .input(z.object({ defaultDailyDriveHours: z.number().min(1).max(12) }))
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        await setSetting(
+          db,
+          PLANNING_SETTINGS_KEY,
+          PlanningSettingsSchema,
+          { defaultDailyDriveHours: input.defaultDailyDriveHours },
+          String(ctx.user.id),
+        );
+        return { defaultDailyDriveHours: input.defaultDailyDriveHours };
+      }),
+    ),
+
   get: op.input(z.object({ id: z.number().int() })).query(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
     const trip = await tripOr404(db, input.id);
@@ -127,6 +154,8 @@ export const tripsRouter = router({
     intakeWrite(async ({ db, input }) => {
       const existing = await db.select({ id: trips.id }).from(trips).where(eq(trips.status, "active"));
       const now = nowIso();
+      const dailyDriveHours =
+        input.dailyDriveHours ?? (await planningSettings(db)).defaultDailyDriveHours;
       let directDurationMinutes: number | null = null;
       try {
         const route = await osrmRoute([input.origin, input.dest], { overview: "false" });
@@ -148,7 +177,7 @@ export const tripsRouter = router({
           destLng: input.dest.lng,
           directDurationMinutes,
           deviationBudgetRatio: input.deviationBudgetRatio,
-          dailyDriveHours: input.dailyDriveHours,
+          dailyDriveHours,
           startDate: input.startDate ?? null,
           createdAt: now,
           updatedAt: now,
@@ -591,8 +620,28 @@ export const planRouter = router({
         if (latest[0]) candidates = await candidatesWithLegs(db, trip.id, latest[0].planDate);
       }
     }
-    return { date, stale, message, candidates };
+    return { date, stale, message, candidates, driveHours: await dayDriveHours(db, trip, date) };
   }),
+
+  /**
+   * Set how many hours we mean to drive today, or clear it with null to run at
+   * the trip's pace. It takes effect on the next replan rather than rebuilding
+   * here — the button that rebuilds plans is Replan, and typing in a box should
+   * not spend routing calls.
+   */
+  setDriveHours: op
+    .input(z.object({ tripId: z.number().int(), hours: z.number().min(1).max(12).nullable() }))
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        const trip = await tripOr404(db, input.tripId);
+        if (trip.status === "completed" || trip.status === "archived") {
+          rejectIntake("A completed trip's route can't be edited — its history is the record.");
+        }
+        const date = planDateOf(nowIso());
+        await setDayDriveHours(db, trip.id, date, input.hours, String(ctx.user.id));
+        return { date, ...(await dayDriveHours(db, trip, date)) };
+      }),
+    ),
 
   replan: op.input(z.object({ tripId: z.number().int() })).mutation(async ({ ctx, input }) => {
     const db = ctx.dbHandle.db;
@@ -604,7 +653,7 @@ export const planRouter = router({
     const existing = await candidatesWithLegs(db, trip.id, date);
     if (existing.length > 0) {
       const stored = await storedPlanFingerprint(db, trip.id, date);
-      if (stored !== null && stored === (await planStateFingerprint(db, trip.id))) {
+      if (stored !== null && stored === (await planStateFingerprint(db, trip.id, date))) {
         return { date, candidates: existing };
       }
     }

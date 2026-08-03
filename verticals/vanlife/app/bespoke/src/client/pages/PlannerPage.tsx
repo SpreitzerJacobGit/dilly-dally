@@ -93,6 +93,8 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     { enabled, staleTime: 60_000, retry: 2 },
   );
   const needsQ = trpc.needs.list.useQuery(undefined, { staleTime: 60_000, retry: 2 });
+  // Only the new-trip form reads this; a trip that exists has its own pace.
+  const defaultsQ = trpc.trips.defaults.useQuery(undefined, { staleTime: 300_000 });
   const digestQ = trpc.digest.today.useQuery({ tripId: tripId ?? 0 }, { enabled });
   const digestHistoryQ = trpc.digest.history.useQuery({ tripId: tripId ?? 0, limit: 7 }, { enabled: enabled && tab === "trip" });
   // A corridor scan of up to 300 places; only the bookkeeping tab shows it.
@@ -253,9 +255,27 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
       setToast("Saved — takes effect on the next replan");
     },
   });
+  // Today's hours are saved on their own; the plan is rebuilt when Replan is
+  // pressed, so the flag is what tells you the cards no longer match the number.
+  const [paceDirty, setPaceDirty] = useState(false);
   const replan = trpc.plan.replan.useMutation({
-    onSuccess: () => void utils.plan.today.invalidate(),
+    onSuccess: () => {
+      setPaceDirty(false);
+      void utils.plan.today.invalidate();
+    },
     onError: (e) => setToast(`Replan unavailable: ${e.message}`),
+  });
+  const setDriveHoursMut = trpc.plan.setDriveHours.useMutation({
+    onSuccess: (r) => {
+      setPaceDirty(true);
+      void utils.plan.today.invalidate();
+      setToast(
+        r.override === null
+          ? `Back to the trip's pace — ${String(r.tripHours)}h`
+          : `Today is ${String(r.override)}h — replan to apply it`,
+      );
+    },
+    onError: onErr,
   });
   const sendDigest = trpc.digest.sendNow.useMutation({
     onSuccess: (r) => {
@@ -279,6 +299,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     setSelectedId(null);
     setHighlightedId(null);
     setSelectionStale(false);
+    setPaceDirty(false);
   }, [tripId]);
 
   // Frame the trip once its Targets have actually arrived. Fitting on the trip
@@ -628,6 +649,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
       <TripEditModal
         mode={modal.kind === "trip-create" ? "create" : "edit"}
         initial={modal.kind === "trip-edit" ? tripValues : null}
+        defaultDailyDriveHours={defaultsQ.data?.defaultDailyDriveHours}
         hasBaseline={tripQ.data?.directDurationMinutes != null}
         busy={createTripMut.isPending || updateTripMut.isPending}
         error={error}
@@ -866,6 +888,9 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
                   : null
               }
               selectionStale={selectionStale}
+              driveHours={planQ.data?.driveHours ?? null}
+              paceDirty={paceDirty}
+              onDriveHours={(hours) => setDriveHoursMut.mutate({ tripId, hours })}
               onReplan={() => replan.mutate({ tripId })}
               onHighlight={setHighlightedId}
               onSelect={(candidateId) => selectMut.mutate({ candidateId })}

@@ -98,6 +98,7 @@ Each day the application proposes candidate routes across a spectrum of ambition
 `[ROUTE-6]` Marking a stop of the selected route as visited records progress; candidates generated afterwards start from the recorded position.
 `[ROUTE-7]` When route computation is unavailable, the planning screen still shows the last generated plan clearly marked as stale, with a visible message — never a blank screen or a silent failure.
 `[ROUTE-8]` Candidates prefer stops that share a trip: a place worth stopping for that sits beside a planned service stop is chosen over an equally good one far from it, and where two places servicing the same need cost nearly the same detour, the one nearest the day's best sights wins — never at the cost of dropping a service stop a need requires, exceeding the deviation budget, or changing the plan when nothing else changed.
+`[ROUTE-9]` How many hours the day is planned around can be set for today alone from the Today tab: it takes effect on the next replan, it leaves the trip's own pace and every Target's expected arrival untouched, and the following day reverts to the trip's pace on its own. The pace a new trip starts at is an application setting.
 
 ## 9. The planning screen
 One screen: the map as the primary surface, with the Origin and Targets list, today's candidates, and the trip's numbers beside it.

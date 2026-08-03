@@ -25,7 +25,16 @@ import {
   trips,
   waypoints,
 } from "../src/db/schema.js";
-import { applyTripUpdate, deleteTrip, movesEndpoints, shouldPushWarnings } from "../src/server/engine/trips.js";
+import {
+  applyTripUpdate,
+  deleteTrip,
+  movesEndpoints,
+  planningSettings,
+  PLANNING_SETTINGS_KEY,
+  PlanningSettingsSchema,
+  shouldPushWarnings,
+} from "../src/server/engine/trips.js";
+import { setSetting } from "@elements/lifecycle-app-settings";
 import { planDateOf, planStateFingerprint } from "../src/server/engine/candidates.js";
 
 const T0 = "2026-07-25T00:00:00.000Z";
@@ -143,6 +152,34 @@ describe("applyTripUpdate — what resets the frozen baseline", () => {
     const r = await applyTripUpdate(handle.db, { id: tripId, dest: DEST, destName: "Vegas" });
     expect(r.baselineReset).toBe(false);
     expect((await readTrip(tripId)).directDurationMinutes).toBe(1200);
+  });
+});
+
+describe("planning defaults — what a new trip starts at", () => {
+  it("is four hours until an operator says otherwise", async () => {
+    expect(await planningSettings(handle.db)).toEqual({ defaultDailyDriveHours: 4 });
+  });
+
+  it("returns the operator's value once set", async () => {
+    await setSetting(
+      handle.db,
+      PLANNING_SETTINGS_KEY,
+      PlanningSettingsSchema,
+      { defaultDailyDriveHours: 6.5 },
+      null,
+    );
+    expect(await planningSettings(handle.db)).toEqual({ defaultDailyDriveHours: 6.5 });
+  });
+
+  it("does not reach a trip that already exists", async () => {
+    await setSetting(
+      handle.db,
+      PLANNING_SETTINGS_KEY,
+      PlanningSettingsSchema,
+      { defaultDailyDriveHours: 9 },
+      null,
+    );
+    expect((await readTrip(tripId)).dailyDriveHours).toBe(4);
   });
 });
 

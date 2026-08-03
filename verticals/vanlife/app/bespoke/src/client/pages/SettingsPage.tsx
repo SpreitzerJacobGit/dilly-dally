@@ -5,7 +5,15 @@ import type { PageUser } from "../index.js";
 import { FormModal } from "../components/FormModal.js";
 import { VL_STYLES } from "../styles.js";
 
-type SettingsForm = "api-keys" | "import" | "ntfy" | "digest-hour" | "add-operator" | null;
+type SettingsForm =
+  | "api-keys"
+  | "import"
+  | "ntfy"
+  | "digest-hour"
+  | "add-operator"
+  | "default-drive-hours"
+  | "trip-drive-hours"
+  | null;
 
 export function SettingsPage(_props: { user: PageUser }): JSX.Element {
   const utils = trpc.useUtils();
@@ -40,6 +48,23 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
   });
   const testPush = trpc.sources.ntfy.testPublish.useMutation({
     onSuccess: (r) => setToast(r.ok ? "Test notification sent" : `Failed: ${"error" in r ? r.error : (r.skipped ?? "unknown")}`),
+  });
+
+  const tripDefaults = trpc.trips.defaults.useQuery();
+  const saveTripDefaults = trpc.trips.saveDefaults.useMutation({
+    onSuccess: () => {
+      void utils.trips.defaults.invalidate();
+      setToast("Saved — applies to trips created from now on");
+    },
+    onError: (e) => setToast(e.message),
+  });
+  const activeTrip = trpc.trips.active.useQuery();
+  const updateTrip = trpc.trips.update.useMutation({
+    onSuccess: () => {
+      void utils.trips.invalidate();
+      setToast("Pace saved — replan to build today around it");
+    },
+    onError: (e) => setToast(e.message),
   });
 
   const digestSettings = trpc.digest.settings.useQuery();
@@ -225,6 +250,27 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
         Add operator account
       </button>
 
+      <h3>Planning</h3>
+      <p style={{ fontSize: ".9rem" }}>
+        Daily drive hours for a new trip: <strong>{tripDefaults.data?.defaultDailyDriveHours ?? 4}h</strong>{" "}
+        <button className="vl-checkin-btn" onClick={() => setActiveForm("default-drive-hours")}>
+          Change
+        </button>
+      </p>
+      {activeTrip.data ? (
+        <p style={{ fontSize: ".9rem" }}>
+          Daily drive hours on “{activeTrip.data.name}”: <strong>{activeTrip.data.dailyDriveHours}h</strong>{" "}
+          <button className="vl-checkin-btn" onClick={() => setActiveForm("trip-drive-hours")}>
+            Change
+          </button>
+          <br />
+          <span style={{ color: "#666" }}>
+            The trip’s pace. To drive more or less than this on one day only, set the hours on the
+            planner’s Today tab.
+          </span>
+        </p>
+      ) : null}
+
       <h3>Digest</h3>
       <p style={{ fontSize: ".9rem" }}>
         Morning digest hour: <strong>{digestSettings.data?.hour ?? 7}:00</strong> (server local time){" "}
@@ -281,6 +327,46 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
           onSubmit={(v) =>
             saveNtfy.mutate({ serverUrl: v.server!, topic: v.topic!, token: v.token ? v.token : undefined })
           }
+          onClose={() => setActiveForm(null)}
+        />
+      ) : null}
+      {activeForm === "default-drive-hours" ? (
+        <FormModal
+          title="Daily drive hours for a new trip"
+          hint="Only the starting value for trips created from now on — existing trips keep their own pace."
+          fields={[
+            {
+              name: "hours",
+              label: "Hours (1–12)",
+              type: "number",
+              min: 1,
+              max: 12,
+              step: "0.5",
+              defaultValue: String(tripDefaults.data?.defaultDailyDriveHours ?? 4),
+              required: true,
+            },
+          ]}
+          onSubmit={(v) => saveTripDefaults.mutate({ defaultDailyDriveHours: Number(v.hours) })}
+          onClose={() => setActiveForm(null)}
+        />
+      ) : null}
+      {activeForm === "trip-drive-hours" && activeTrip.data ? (
+        <FormModal
+          title={`Daily drive hours on “${activeTrip.data.name}”`}
+          hint="The pace every day of this trip is planned around. It also re-times when each Target is expected."
+          fields={[
+            {
+              name: "hours",
+              label: "Hours (1–12)",
+              type: "number",
+              min: 1,
+              max: 12,
+              step: "0.5",
+              defaultValue: String(activeTrip.data.dailyDriveHours),
+              required: true,
+            },
+          ]}
+          onSubmit={(v) => updateTrip.mutate({ id: activeTrip.data!.id, dailyDriveHours: Number(v.hours) })}
           onClose={() => setActiveForm(null)}
         />
       ) : null}
