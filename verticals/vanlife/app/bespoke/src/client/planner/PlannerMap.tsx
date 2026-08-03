@@ -29,6 +29,19 @@ export interface PlannerMapProps {
   poisFilterable: boolean;
   onToggleCategory: (category: string) => void;
   onSetAllCategories: (visible: boolean) => void;
+  /**
+   * Cell signal overlay, split the same way the category filter is: what to
+   * draw goes to the map, what to click goes to the legend.
+   */
+  showSignal: boolean;
+  signalCarrier: string;
+  /** Undefined until /tiles/status answers, or when no archive is installed. */
+  signalVersion: string | undefined;
+  /** Why the overlay cannot be shown, or null when it can. */
+  signalUnavailable: string | null;
+  signalAsOf: string | null;
+  onToggleSignal: (on: boolean) => void;
+  onSignalCarrier: (carrier: string) => void;
   position: { lat: number; lng: number } | null;
   origin: MapOriginView | null;
   targets: MapTargetView[];
@@ -67,6 +80,9 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         pois={props.pois}
         poiMinZoom={props.poiMinZoom}
         hiddenCategories={props.poisFilterable ? props.hiddenCategories : undefined}
+        showSignal={props.showSignal}
+        signalCarrier={props.signalCarrier}
+        signalVersion={props.signalVersion}
         position={props.position}
         origin={props.origin}
         targets={props.targets}
@@ -90,6 +106,12 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         poiSourceLabel={props.poiSourceLabel}
         onToggle={props.onToggleCategory}
         onSetAll={props.onSetAllCategories}
+        signalOn={props.showSignal}
+        signalCarrier={props.signalCarrier}
+        signalUnavailable={props.signalUnavailable}
+        signalAsOf={props.signalAsOf}
+        onToggleSignal={props.onToggleSignal}
+        onSignalCarrier={props.onSignalCarrier}
       />
 
       {props.detail}

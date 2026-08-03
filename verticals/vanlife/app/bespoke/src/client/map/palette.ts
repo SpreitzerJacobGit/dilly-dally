@@ -64,6 +64,70 @@ export const CATEGORY_LABELS: Record<string, string> = {
 /** Service categories first, then the interest ones — the order they are declared in. */
 export const ALL_CATEGORIES: string[] = Object.keys(CATEGORY_COLORS);
 
+/**
+ * Cell signal tiers, worst to best.
+ *
+ * Ordinals rather than names because the tiles carry numbers: a `match` on an
+ * integer is both smaller in the archive and cheaper to evaluate than one on
+ * strings, and the ordering is the whole point of the scale.
+ *
+ * Tier 0 — no service — is deliberately absent from every table here. It draws
+ * nothing at all, so a dead zone reads as plain basemap. Painting it grey would
+ * put a wash over the map that is indistinguishable from a tile that failed to
+ * load, which is the one thing this app's map is careful never to do.
+ */
+export const SIGNAL_TIERS: number[] = [1, 2, 3, 4];
+
+/**
+ * A sequential single-hue ramp, light to dark — sequential because signal is
+ * ordered data, and a categorical palette would invite reading "5G" as a
+ * different kind of thing rather than as more of the same thing.
+ *
+ * Greens from ColorBrewer's PRGn, which stay distinguishable under the same
+ * deuteranopia and protanopia the role colors are already chosen against.
+ */
+export const SIGNAL_COLORS: Record<number, string> = {
+  1: "#d9f0d3",
+  2: "#a6dba0",
+  3: "#5aae61",
+  4: "#1b7837",
+};
+
+/**
+ * Keyed identically to SIGNAL_COLORS — the legend walks the tier list, so a
+ * tier added to one without the other shows up as a missing label rather than
+ * as an unexplained color.
+ */
+export const SIGNAL_LABELS: Record<number, string> = {
+  1: "Weak LTE",
+  2: "LTE",
+  3: "5G",
+  4: "Fast 5G",
+};
+
+/**
+ * Carriers the overlay can color by, in menu order.
+ *
+ * `best` leads and is the default: "is there any signal here at all" is the
+ * question worth answering before you know whose SIM is in the phone, and it
+ * is the only one that stays useful when the van carries two.
+ */
+export const SIGNAL_CARRIERS: { key: string; label: string }[] = [
+  { key: "best", label: "Any carrier" },
+  { key: "att", label: "AT&T" },
+  { key: "tmo", label: "T-Mobile" },
+  { key: "vzw", label: "Verizon" },
+];
+
+export const DEFAULT_SIGNAL_CARRIER = "best";
+
+/**
+ * Says plainly what the overlay is, because it is modelled coverage the
+ * carriers filed with the FCC rather than anything anyone measured — and it is
+ * well known to be optimistic. Shown wherever the overlay is.
+ */
+export const SIGNAL_SOURCE_LABEL = "FCC carrier-reported coverage — modelled, not measured";
+
 export function roleColor(tier: string): string {
   return ROLE_COLORS[tier] ?? "#64748b";
 }
@@ -74,4 +138,21 @@ export function categoryColor(category: string): string {
 
 export function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
+}
+
+export function signalColor(tier: number): string {
+  return SIGNAL_COLORS[tier] ?? "transparent";
+}
+
+export function signalLabel(tier: number): string {
+  return SIGNAL_LABELS[tier] ?? "No service";
+}
+
+/**
+ * Whether a carrier key is one we actually publish a property for. Persisted
+ * preferences outlive the palette, so a key retired between releases must not
+ * reach a paint expression and silently color the whole map as "no service".
+ */
+export function isSignalCarrier(key: string): boolean {
+  return SIGNAL_CARRIERS.some((c) => c.key === key);
 }

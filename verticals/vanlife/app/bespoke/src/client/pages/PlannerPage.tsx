@@ -13,8 +13,16 @@ import type { DigestView } from "../components/DigestBanner.js";
 import type { TargetTreeNode, DropZone } from "../components/TargetTree.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
 import { readGrantedFix } from "../lib/geocode.js";
-import { readHiddenPoiCategories, writeHiddenPoiCategories } from "../lib/prefs.js";
-import { ALL_CATEGORIES } from "../map/palette.js";
+import {
+  readHiddenPoiCategories,
+  readSignalCarrier,
+  readSignalOverlay,
+  writeHiddenPoiCategories,
+  writeSignalCarrier,
+  writeSignalOverlay,
+} from "../lib/prefs.js";
+import { useCellSignalArchive } from "../lib/cellSignal.js";
+import { ALL_CATEGORIES, DEFAULT_SIGNAL_CARRIER, isSignalCarrier } from "../map/palette.js";
 import { VL_STYLES } from "../styles.js";
 import { PlannerMap } from "../planner/PlannerMap.js";
 import { TripPicker } from "../planner/TripPicker.js";
@@ -75,6 +83,15 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
   const [needSearch, setNeedSearch] = useState<NeedStateView | null>(null);
   const [sheetPois, setSheetPois] = useState<MapPoiView[]>([]);
   const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(readHiddenPoiCategories);
+  // Cell signal overlay. The carrier is validated on read rather than trusted:
+  // a key retired between releases would otherwise reach a paint expression
+  // and color the whole map as "no service".
+  const [showSignal, setShowSignal] = useState<boolean>(readSignalOverlay);
+  const [signalCarrier, setSignalCarrier] = useState<string>(() => {
+    const stored = readSignalCarrier();
+    return stored !== null && isSignalCarrier(stored) ? stored : DEFAULT_SIGNAL_CARRIER;
+  });
+  const signalArchive = useCellSignalArchive();
   const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
   const [modal, setModal] = useState<
     | null
@@ -421,6 +438,17 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     setHiddenCategories(next);
   }
 
+  function toggleSignal(on: boolean): void {
+    writeSignalOverlay(on);
+    setShowSignal(on);
+  }
+
+  function chooseSignalCarrier(carrier: string): void {
+    if (!isSignalCarrier(carrier)) return;
+    writeSignalCarrier(carrier);
+    setSignalCarrier(carrier);
+  }
+
   const mapRoutes: CandidateRouteView[] = tab === "today" ? candidates : [];
   const needStates = (needsQ.data ?? []) as NeedStateView[];
 
@@ -719,6 +747,13 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           poisFilterable={!searchOpen && !showingSuggestions}
           onToggleCategory={toggleCategory}
           onSetAllCategories={setAllCategories}
+          showSignal={showSignal}
+          signalCarrier={signalCarrier}
+          signalVersion={signalArchive.version}
+          signalUnavailable={signalArchive.unavailable}
+          signalAsOf={signalArchive.asOf}
+          onToggleSignal={toggleSignal}
+          onSignalCarrier={chooseSignalCarrier}
           position={tripQ.data?.position ?? null}
           origin={
             tripQ.data

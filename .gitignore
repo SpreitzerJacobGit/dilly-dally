@@ -11,3 +11,8 @@ verticals/*/db/*.db*
 # Local scratch for prepared map/routing inputs — multi-GB, never committed.
 .data-src/
 .tiles/
+
+# FCC Broadband Data Collection API credentials for the coverage refresh.
+# Lives on the van server only; the app itself never needs it.
+.fcc-token
+

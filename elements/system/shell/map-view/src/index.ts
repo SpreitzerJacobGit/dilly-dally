@@ -20,6 +20,35 @@ export interface TileAssetsOptions {
  * band) — but /<prefix>/status reports it honestly so a status page can say
  * "basemap missing" instead of the map silently failing.
  */
+/**
+ * Sidecar manifests: any *.json sitting beside the archives, parsed and keyed
+ * by basename.
+ *
+ * Tile volumes are filled out of band by scripts this server never sees, and a
+ * manifest is how such a script reports what it installed and when it last
+ * managed to — the difference between "no coverage here" and "the refresh has
+ * been failing since March". Deliberately untyped and generic: this element
+ * knows about archives, not about what any particular archive contains.
+ */
+function readManifests(root: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!fs.existsSync(root)) return out;
+  for (const file of fs.readdirSync(root)) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const full = path.join(root, file);
+      // A manifest is a handful of fields. Anything larger is not one, and
+      // parsing it would put an unbounded read inside a status endpoint.
+      if (fs.statSync(full).size > 64 * 1024) continue;
+      out[file.slice(0, -".json".length)] = JSON.parse(fs.readFileSync(full, "utf8"));
+    } catch {
+      // Half-written or malformed: skip it. A bad manifest must not take down
+      // the endpoint whose whole job is to report that something is wrong.
+    }
+  }
+  return out;
+}
+
 export function createTileAssetsPlugin(opts: TileAssetsOptions): FastifyPluginAsync {
   const prefix = opts.prefix ?? "/tiles";
   const root = path.resolve(opts.dir);
@@ -35,6 +64,7 @@ export function createTileAssetsPlugin(opts: TileAssetsOptions): FastifyPluginAs
         archives: pmtiles,
         glyphs: fs.existsSync(path.join(root, "glyphs")),
         sprites: fs.existsSync(path.join(root, "sprites")),
+        manifests: readManifests(root),
       };
     });
 

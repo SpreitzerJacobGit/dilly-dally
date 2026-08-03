@@ -8,7 +8,15 @@ import {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle, initMapLibre } from "@elements/shell-map-view/client";
-import { CATEGORY_COLORS, PROJECTED_COLOR, ROLE_COLORS } from "./palette.js";
+import {
+  CATEGORY_COLORS,
+  DEFAULT_SIGNAL_CARRIER,
+  isSignalCarrier,
+  PROJECTED_COLOR,
+  ROLE_COLORS,
+  SIGNAL_COLORS,
+  SIGNAL_TIERS,
+} from "./palette.js";
 import type { CandidateRouteView, MapTargetView, MapViewProps } from "./types.js";
 
 /**
@@ -21,6 +29,17 @@ initMapLibre();
 
 const PMTILES_URL = "/tiles/basemap.pmtiles";
 const ASSETS_URL = "/tiles";
+
+/**
+ * The cell signal overlay, provisioned separately from the basemap by a
+ * scheduled refresh and therefore legitimately absent on a fresh install.
+ * SIGNAL_SOURCE_LAYER is the layer name tippecanoe writes into the archive —
+ * get it wrong and the source loads fine while nothing ever draws.
+ */
+const SIGNAL_SOURCE = "cell-signal";
+const SIGNAL_LAYER = "cell-signal-fill";
+const SIGNAL_PMTILES_URL = "pmtiles:///tiles/cell-signal.pmtiles";
+const SIGNAL_SOURCE_LAYER = "coverage";
 
 function routesToGeojson(routes: CandidateRouteView[], highlightedId: number | null) {
   return {
@@ -116,6 +135,25 @@ const categoryColorExpr = [
   "#64748b",
 ] as unknown as string;
 
+/**
+ * Colors a hex by one carrier's tier. Which carrier is a property name rather
+ * than a filter, because every hex carries a tier for all of them: switching
+ * carrier is then a repaint of tiles already in memory, with nothing refetched.
+ *
+ * The fallback covers tier 0 and any hex missing the property entirely, and is
+ * transparent on purpose — a dead zone reads as plain basemap. A grey wash
+ * would be indistinguishable from tiles that failed to load.
+ */
+function signalColorExpr(carrier: string): string {
+  const key = isSignalCarrier(carrier) ? carrier : DEFAULT_SIGNAL_CARRIER;
+  return [
+    "match",
+    ["get", key],
+    ...SIGNAL_TIERS.flatMap((tier) => [tier, SIGNAL_COLORS[tier] ?? "transparent"]),
+    "transparent",
+  ] as unknown as string;
+}
+
 export function MapView(props: MapViewProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
@@ -143,8 +181,16 @@ export function MapView(props: MapViewProps): JSX.Element {
     // through this event and nowhere else. Without it a broken basemap renders
     // as a silent grey rectangle — exactly the kind of quiet degradation this
     // app is meant not to do.
-    map.on("error", (e: { error?: Error }) => {
+    map.on("error", (e: { error?: Error; sourceId?: string }) => {
       const message = e.error?.message ?? "unknown map error";
+      // The signal overlay is optional and separately provisioned. Reporting
+      // its absence as "basemap unavailable" would send someone to check the
+      // wrong archive, so it is logged and left to the legend to explain.
+      if (e.sourceId === SIGNAL_SOURCE) {
+        // eslint-disable-next-line no-console
+        console.error("cell signal overlay error:", message);
+        return;
+      }
       // eslint-disable-next-line no-console
       console.error("basemap error:", message);
       setBasemapError((prev) => prev ?? message);
@@ -494,6 +540,69 @@ export function MapView(props: MapViewProps): JSX.Element {
         : (["!", ["in", ["get", "category"], ["literal", [...hidden]]]] as unknown as never),
     );
   }, [props.hiddenCategories, ready]);
+
+  // The signal overlay is added here rather than in the load handler because
+  // until the page has asked /tiles/status we do not know the archive exists,
+  // and a source pointed at a missing one spends the whole tile budget on 404s.
+  // Re-runs when the version changes, which is how a refreshed archive gets
+  // picked up: the version is in the URL, so the browser cannot serve the
+  // previous archive's byte ranges for the new one.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const version = props.signalVersion;
+    if (version === undefined) return;
+
+    if (map.getLayer(SIGNAL_LAYER)) map.removeLayer(SIGNAL_LAYER);
+    if (map.getSource(SIGNAL_SOURCE)) map.removeSource(SIGNAL_SOURCE);
+
+    map.addSource(SIGNAL_SOURCE, {
+      type: "vector",
+      url: `${SIGNAL_PMTILES_URL}?v=${encodeURIComponent(version)}`,
+    });
+    // Below targets-fill, which is the lowest layer this component adds — so
+    // the overlay sits on the basemap and every route, ring and dot stays
+    // legible on top of it.
+    map.addLayer(
+      {
+        id: SIGNAL_LAYER,
+        type: "fill",
+        source: SIGNAL_SOURCE,
+        "source-layer": SIGNAL_SOURCE_LAYER,
+        layout: { visibility: propsRef.current.showSignal ? "visible" : "none" },
+        paint: {
+          "fill-color": signalColorExpr(propsRef.current.signalCarrier ?? DEFAULT_SIGNAL_CARRIER),
+          // Enough to read the ramp, little enough to leave roads and labels
+          // underneath it readable — this is advisory context, not the subject.
+          "fill-opacity": 0.5,
+        },
+      },
+      map.getLayer("targets-fill") ? "targets-fill" : undefined,
+    );
+  }, [props.signalVersion, ready]);
+
+  // Toggled on the layer rather than by adding and removing it: re-adding
+  // would re-parse the style and re-request every tile, where this repaints
+  // on the next frame from tiles already in memory.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!map.getLayer(SIGNAL_LAYER)) return;
+    map.setLayoutProperty(SIGNAL_LAYER, "visibility", props.showSignal ? "visible" : "none");
+  }, [props.showSignal, props.signalVersion, ready]);
+
+  // Every hex carries a tier for every carrier, so switching carrier is a
+  // repaint of the same tiles — nothing is refetched and nothing reloads.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!map.getLayer(SIGNAL_LAYER)) return;
+    map.setPaintProperty(
+      SIGNAL_LAYER,
+      "fill-color",
+      signalColorExpr(props.signalCarrier ?? DEFAULT_SIGNAL_CARRIER),
+    );
+  }, [props.signalCarrier, props.signalVersion, ready]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>

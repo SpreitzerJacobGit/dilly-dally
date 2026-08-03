@@ -103,6 +103,27 @@ export interface MapViewProps {
    * asked for by name and must not be silently withheld.
    */
   hiddenCategories?: Set<string>;
+  /**
+   * Whether to draw the cell signal overlay. The layer is added either way —
+   * toggling visibility repaints on the next frame, where adding and removing
+   * the layer would re-parse the style and re-request tiles every time.
+   */
+  showSignal?: boolean;
+  /**
+   * Which carrier's coverage the overlay colors by: one of the keys in
+   * SIGNAL_CARRIERS. Undefined means the default, "best of any carrier".
+   */
+  signalCarrier?: string;
+  /**
+   * Identifies the installed overlay archive — in practice the FCC "as of"
+   * date. Undefined means not known yet, or no archive installed at all, and
+   * the overlay is not added to the map until it is known: a source pointed at
+   * a missing archive would spend the tile budget on 404s.
+   *
+   * It also travels in the tile URL, so an archive replaced in place by the
+   * scheduled refresh is not masked by the browser's cache of the old one.
+   */
+  signalVersion?: string;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;

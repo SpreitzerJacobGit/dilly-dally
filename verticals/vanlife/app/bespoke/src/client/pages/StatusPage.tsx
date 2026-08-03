@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { StatCard, DashboardGrid } from "@elements/output-dashboard-cards";
 import { DataTable } from "@elements/shell-crud-tables";
 import type { PageUser } from "../index.js";
+import { readCellSignalManifest } from "../lib/cellSignal.js";
 import { VL_STYLES } from "../styles.js";
 
 interface HealthInfo {
@@ -36,10 +37,48 @@ interface TilesInfo {
   archives: string[];
   glyphs: boolean;
   sprites: boolean;
+  manifests?: Record<string, unknown>;
 }
 
 function timeOrNever(value: string | null | undefined): string {
   return value ? value.replace("T", " ").slice(0, 19) : "Never";
+}
+
+/**
+ * The coverage archive is built by a scheduled task on the host rather than by
+ * the deploy, so "not installed" is an ordinary state on a fresh van and reads
+ * neutral. The state worth shouting about is the opposite one: an archive that
+ * is present, looks fine on the map, and has not successfully refreshed since
+ * March. That is the failure this card exists to make visible.
+ */
+function coverageStatus(tiles: TilesInfo | null): {
+  value: string;
+  tone: "neutral" | "good" | "alert";
+  detail: string;
+} {
+  if (tiles === null) return { value: "…", tone: "neutral", detail: "" };
+  if (!tiles.archives.includes("cell-signal.pmtiles")) {
+    return {
+      value: "Not installed",
+      tone: "neutral",
+      detail: "Run deploy/refresh-cell-signal.ps1 to build it",
+    };
+  }
+  const manifest = readCellSignalManifest(tiles);
+  if (manifest === null) return { value: "Present", tone: "good", detail: "no manifest — age unknown" };
+  const asOf = manifest.asOfDate ?? "unknown date";
+  if (manifest.lastError !== null) {
+    return {
+      value: "Stale",
+      tone: "alert",
+      detail: `as of ${asOf} · last success ${timeOrNever(manifest.lastSuccess)} · ${manifest.lastError}`,
+    };
+  }
+  return {
+    value: "Present",
+    tone: "good",
+    detail: `as of ${asOf} · last checked ${timeOrNever(manifest.lastRun)}`,
+  };
 }
 
 async function fetchJson<T>(url: string): Promise<T | null> {
@@ -69,6 +108,8 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
     void load();
   }, [load]);
 
+  const coverage = coverageStatus(tiles);
+
   return (
     <>
       <style>{VL_STYLES}</style>
@@ -89,6 +130,12 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
           value={tiles?.present && tiles.archives.length > 0 ? "Present" : "Missing"}
           tone={tiles?.present && tiles.archives.length > 0 ? "good" : "alert"}
           detail={tiles ? `${tiles.archives.join(", ") || "no archive"} · glyphs ${tiles.glyphs ? "✓" : "✗"} · sprites ${tiles.sprites ? "✓" : "✗"}` : undefined}
+        />
+        <StatCard
+          label="Cell coverage data"
+          value={coverage.value}
+          tone={coverage.tone}
+          detail={coverage.detail || undefined}
         />
         <StatCard
           label="Uptime"
