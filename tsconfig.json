@@ -4,7 +4,8 @@
     "elements/**/src/**/*",
     "elements/**/test/**/*",
     "verticals/*/app/*/src/**/*",
-    "verticals/*/seed.fixtures.ts"
+    "verticals/*/seed.fixtures.ts",
+    "verticals/*/deploy/**/*.ts"
   ],
   "exclude": ["**/node_modules", "**/dist"]
 }

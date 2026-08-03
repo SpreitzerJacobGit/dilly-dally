@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "How far from a designated road dispersed camping is legal, per national forest.",
+    "",
+    "The national MVUM roads dataset has no camping-distance attribute, so these",
+    "numbers cannot be derived — each one is read off an official Forest Service",
+    "page and cited. Forests absent from this table are buffered at defaultFeet and",
+    "marked confidence=default_buffer, which the map draws as an estimate.",
+    "",
+    "Keys must match the MVUM dataset's FORESTNAME field. Matching is done on a",
+    "case- and whitespace-normalized form (see engine/legalBuffer.ts), but staying",
+    "verbatim keeps this file greppable against the source data.",
+    "",
+    "Adding a forest: find its official dispersed-camping or MVUM page, quote the",
+    "distance, put the URL in source and today's date in checked. An entry without",
+    "a source is rejected at build time rather than trusted."
+  ],
+  "defaultFeet": 300,
+  "forests": {
+    "Gifford Pinchot National Forest": {
+      "feet": 150,
+      "source": "https://www.fs.usda.gov/sites/nfs/files/legacy-media/giffordpinchot/MVUM%20Insert%20Using%20Your%20MVUM.pdf",
+      "checked": "2026-08-03"
+    },
+    "Dixie National Forest": {
+      "feet": 150,
+      "source": "https://www.fs.usda.gov/r04/dixie/recreation/camping-cabins",
+      "checked": "2026-08-03"
+    },
+    "Rio Grande National Forest": {
+      "feet": 300,
+      "source": "https://www.fs.usda.gov/r02/riogrande/recreation/dispersed-camping",
+      "checked": "2026-08-03"
+    },
+    "Nebraska National Forest": {
+      "feet": 300,
+      "source": "https://www.fs.usda.gov/r02/nebraska/recreation/dispersed-camping",
+      "checked": "2026-08-03"
+    }
+  }
+}

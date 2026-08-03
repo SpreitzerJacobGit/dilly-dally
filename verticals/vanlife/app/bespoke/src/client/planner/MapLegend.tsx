@@ -1,12 +1,19 @@
 import { useState, type JSX } from "react";
 import {
   ALL_CATEGORIES,
+  ALL_LAND_LAYERS,
   categoryColor,
   categoryLabel,
+  landColor,
+  landLabel,
   PROJECTED_COLOR,
   ROLE_LABELS,
   roleColor,
 } from "../map/palette.js";
+import { useTileArchivePresent } from "../lib/tileStatus.js";
+
+/** The overlay archive, prepared out of band; absent on a van that never ran the prep. */
+const LEGAL_ARCHIVE = "legal-camping.pmtiles";
 
 /**
  * The map's key, and the only place to switch categories of place on and off.
@@ -35,6 +42,9 @@ export interface MapLegendProps {
   poiSourceLabel: string;
   onToggle: (category: string) => void;
   onSetAll: (visible: boolean) => void;
+  /** Legal-camping land layers switched off, keyed like LAND_COLORS. */
+  hiddenLand: Set<string>;
+  onToggleLand: (layer: string) => void;
 }
 
 export function MapLegend(props: MapLegendProps): JSX.Element {
@@ -44,9 +54,15 @@ export function MapLegend(props: MapLegendProps): JSX.Element {
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 900px)").matches,
   );
 
+  // Withheld rather than shown dead when the overlay was never installed: a
+  // switch for a layer that cannot draw is the same lie as a category checkbox
+  // over places the filter does not apply to.
+  const legalAvailable = useTileArchivePresent(LEGAL_ARCHIVE) === true;
+
   // Only meaningful while the filter is actually in force — the count would
   // otherwise sit there claiming to hide places that are all on screen.
-  const hiddenCount = props.filterable ? props.hidden.size : 0;
+  const hiddenCount =
+    (props.filterable ? props.hidden.size : 0) + (legalAvailable ? props.hiddenLand.size : 0);
 
   return (
     <div className="vl-legend">
@@ -88,6 +104,29 @@ export function MapLegend(props: MapLegendProps): JSX.Element {
                     {categoryLabel(category)}
                   </label>
                 ))}
+              </div>
+            </>
+          ) : null}
+
+          {legalAvailable ? (
+            <>
+              <div className="vl-legend-section">
+                <span>Legal camping</span>
+              </div>
+              {ALL_LAND_LAYERS.map((layer) => (
+                <label key={layer} className="vl-legend-row">
+                  <input
+                    type="checkbox"
+                    checked={!props.hiddenLand.has(layer)}
+                    onChange={() => props.onToggleLand(layer)}
+                  />
+                  <span className="vl-landswatch" style={{ background: landColor(layer) }} />
+                  {landLabel(layer)}
+                </label>
+              ))}
+              <div className="vl-legend-note">
+                A dashed edge means the width is assumed, not published. Advisory only — unshaded
+                is "unverified", never "illegal". Check the current MVUM and local closures.
               </div>
             </>
           ) : null}

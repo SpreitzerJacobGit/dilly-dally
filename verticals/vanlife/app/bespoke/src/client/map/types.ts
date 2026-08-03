@@ -103,6 +103,14 @@ export interface MapViewProps {
    * asked for by name and must not be silently withheld.
    */
   hiddenCategories?: Set<string>;
+  /**
+   * Legal-camping land layers switched off, keyed like LAND_COLORS.
+   *
+   * The overlay only draws at all when its archive is present on the tile
+   * volume; an absent archive is reported on the Status page rather than
+   * silently leaving the map unshaded.
+   */
+  hiddenLandLayers?: Set<string>;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;

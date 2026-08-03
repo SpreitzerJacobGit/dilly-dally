@@ -15,6 +15,7 @@ const DIGEST_DISMISSED = (userKey: string): string => `vl.digestDismissed.${user
 /** Check-ins recorded with no uplink, waiting to be replayed. */
 export const CHECKIN_QUEUE_KEY = "vl.checkinQueue";
 const POI_CATEGORIES_HIDDEN = "vl.poiCategoriesHidden";
+const LEGAL_LAYERS_HIDDEN = "vl.legalLayersHidden";
 
 function read(key: string): string | null {
   try {
@@ -75,4 +76,27 @@ export function readHiddenPoiCategories(): Set<string> {
 
 export function writeHiddenPoiCategories(hidden: Set<string>): void {
   write(POI_CATEGORIES_HIDDEN, hidden.size === 0 ? null : JSON.stringify([...hidden]));
+}
+
+/**
+ * Which legal-camping land layers the legend has switched off.
+ *
+ * Stored as the hidden set for the same reason the categories are: a layer added
+ * to the overlay later must arrive visible rather than silently switched off for
+ * everyone who has ever touched these checkboxes.
+ */
+export function readHiddenLandLayers(): Set<string> {
+  const raw = read(LEGAL_LAYERS_HIDDEN);
+  if (raw === null) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((l): l is string => typeof l === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeHiddenLandLayers(hidden: Set<string>): void {
+  write(LEGAL_LAYERS_HIDDEN, hidden.size === 0 ? null : JSON.stringify([...hidden]));
 }

@@ -117,6 +117,10 @@ bespoke:
     - { id: poi, title: POI aggregation, requirementsSection: "#poi" }
     - { id: routes, title: Route candidates, requirementsSection: "#routes" }
     - { id: map-dashboard, title: Map dashboard, requirementsSection: "#map" }
+    # No element and no tables of its own: the overlay is a second PMTiles
+    # archive on the tiles volume, built out of band by deploy/prepare-legal-overlay.ps1
+    # and served by the map element's existing tile-assets plugin.
+    - { id: legal, title: Legal camping overlay, requirementsSection: "#legal" }
     - { id: interests, title: Interest profile, requirementsSection: "#interests" }
     - { id: digest, title: Daily digest, requirementsSection: "#digest" }
     - { id: offline, title: Offline & remote, requirementsSection: "#offline" }

@@ -12,7 +12,12 @@ import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { DigestView } from "../components/DigestBanner.js";
 import type { TargetTreeNode, DropZone } from "../components/TargetTree.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
-import { readHiddenPoiCategories, writeHiddenPoiCategories } from "../lib/prefs.js";
+import {
+  readHiddenLandLayers,
+  readHiddenPoiCategories,
+  writeHiddenLandLayers,
+  writeHiddenPoiCategories,
+} from "../lib/prefs.js";
 import { ALL_CATEGORIES } from "../map/palette.js";
 import { VL_STYLES } from "../styles.js";
 import { PlannerMap } from "../planner/PlannerMap.js";
@@ -74,6 +79,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
   const [needSearch, setNeedSearch] = useState<NeedStateView | null>(null);
   const [sheetPois, setSheetPois] = useState<MapPoiView[]>([]);
   const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(readHiddenPoiCategories);
+  const [hiddenLandLayers, setHiddenLandLayers] = useState<Set<string>>(readHiddenLandLayers);
   const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
   const [modal, setModal] = useState<
     | null
@@ -420,6 +426,13 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     setHiddenCategories(next);
   }
 
+  function toggleLandLayer(layer: string): void {
+    const next = new Set(hiddenLandLayers);
+    if (!next.delete(layer)) next.add(layer);
+    writeHiddenLandLayers(next);
+    setHiddenLandLayers(next);
+  }
+
   const mapRoutes: CandidateRouteView[] = tab === "today" ? candidates : [];
   const needStates = (needsQ.data ?? []) as NeedStateView[];
 
@@ -729,6 +742,8 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           poisFilterable={!searchOpen && !showingSuggestions}
           onToggleCategory={toggleCategory}
           onSetAllCategories={setAllCategories}
+          hiddenLandLayers={hiddenLandLayers}
+          onToggleLandLayer={toggleLandLayer}
           position={tripQ.data?.position ?? null}
           origin={
             tripQ.data

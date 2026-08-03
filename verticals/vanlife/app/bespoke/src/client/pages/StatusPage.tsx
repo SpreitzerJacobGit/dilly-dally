@@ -38,6 +38,16 @@ interface TilesInfo {
   sprites: boolean;
 }
 
+/** The overlay archive and the sidecar written beside it by the overlay prep. */
+const LEGAL_ARCHIVE = "legal-camping.pmtiles";
+
+interface LegalProvenance {
+  generatedAt?: string;
+  defaultBufferFeet?: number;
+  verifiedForests?: { forest: string }[];
+  sources?: { name: string; retrieved: string }[];
+}
+
 function timeOrNever(value: string | null | undefined): string {
   return value ? value.replace("T", " ").slice(0, 19) : "Never";
 }
@@ -57,12 +67,21 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
   const [ready, setReady] = useState<boolean | null>(null);
   const [diag, setDiag] = useState<DiagInfo | null>(null);
   const [tiles, setTiles] = useState<TilesInfo | null>(null);
+  const [legal, setLegal] = useState<LegalProvenance | null>(null);
 
   const load = useCallback(async () => {
     setHealth(await fetchJson<HealthInfo>("/healthz"));
     setReady((await fetchJson<{ ok: boolean }>("/readyz"))?.ok ?? false);
     setDiag(await fetchJson<DiagInfo>("/__diag"));
-    setTiles(await fetchJson<TilesInfo>("/tiles/status"));
+    const t = await fetchJson<TilesInfo>("/tiles/status");
+    setTiles(t);
+    // Only asked for when the archive is actually there — a 404 for the sidecar
+    // of an overlay nobody installed is noise, not a finding.
+    setLegal(
+      t?.archives.includes(LEGAL_ARCHIVE) === true
+        ? await fetchJson<LegalProvenance>("/tiles/legal-camping.json")
+        : null,
+    );
   }, []);
 
   useEffect(() => {
@@ -89,6 +108,21 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
           value={tiles?.present && tiles.archives.length > 0 ? "Present" : "Missing"}
           tone={tiles?.present && tiles.archives.length > 0 ? "good" : "alert"}
           detail={tiles ? `${tiles.archives.join(", ") || "no archive"} · glyphs ${tiles.glyphs ? "✓" : "✗"} · sprites ${tiles.sprites ? "✓" : "✗"}` : undefined}
+        />
+        {/* Never "alert": an overlay nobody installed is a choice, not a fault.
+            The map simply draws no legality wash, and unshaded already means
+            "unverified" rather than "illegal". */}
+        <StatCard
+          label="Legal camping overlay"
+          value={tiles === null ? "…" : tiles.archives.includes(LEGAL_ARCHIVE) ? "Present" : "Not installed"}
+          tone={tiles?.archives.includes(LEGAL_ARCHIVE) ? "good" : undefined}
+          detail={
+            legal
+              ? `built ${timeOrNever(legal.generatedAt)} · ${String(legal.verifiedForests?.length ?? 0)} forest(s) with a published distance · ${String(legal.defaultBufferFeet ?? 0)} ft assumed elsewhere`
+              : tiles?.archives.includes(LEGAL_ARCHIVE)
+                ? "archive present, provenance sidecar missing"
+                : "run deploy/prepare-legal-overlay.ps1 to build it"
+          }
         />
         <StatCard
           label="Uptime"

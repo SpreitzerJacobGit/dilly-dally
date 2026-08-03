@@ -29,6 +29,9 @@ export interface PlannerMapProps {
   poisFilterable: boolean;
   onToggleCategory: (category: string) => void;
   onSetAllCategories: (visible: boolean) => void;
+  /** Legal-camping land layers switched off in the legend. */
+  hiddenLandLayers: Set<string>;
+  onToggleLandLayer: (layer: string) => void;
   position: { lat: number; lng: number } | null;
   origin: MapOriginView | null;
   targets: MapTargetView[];
@@ -67,6 +70,7 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         pois={props.pois}
         poiMinZoom={props.poiMinZoom}
         hiddenCategories={props.poisFilterable ? props.hiddenCategories : undefined}
+        hiddenLandLayers={props.hiddenLandLayers}
         position={props.position}
         origin={props.origin}
         targets={props.targets}
@@ -90,6 +94,8 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         poiSourceLabel={props.poiSourceLabel}
         onToggle={props.onToggleCategory}
         onSetAll={props.onSetAllCategories}
+        hiddenLand={props.hiddenLandLayers}
+        onToggleLand={props.onToggleLandLayer}
       />
 
       {props.detail}
