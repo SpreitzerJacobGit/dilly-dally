@@ -109,7 +109,7 @@ export const poiMarks = sqliteTable(
 /** A tracked van-life need with capacity, thresholds, and its servicing place category. */
 export const needs = sqliteTable("needs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  key: text("need_key").notNull().unique(), // food | gas | water | laundry | trash | wastewater | electric | internet
+  key: text("need_key").notNull().unique(), // Seeded: food | gas | water | laundry | trash | wastewater | electric | internet; operator-created needs slug their title.
   title: text("title").notNull(),
   unit: text("unit").notNull(),
   capacity: real("capacity").notNull(),
@@ -120,6 +120,11 @@ export const needs = sqliteTable("needs", {
   routingDriver: integer("routing_driver", { mode: "boolean" }).notNull().default(true), // Internet is tracked but never generates stops.
   sortOrder: integer("sort_order").notNull(),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
+  trackingMode: text("tracking_mode").notNull().default("level"), // level = consumable with a capacity and a rate; date = simply due on a day.
+  dueAt: text("due_at"), // When a date-tracked need falls due. Null for level-tracked needs.
+  warnDays: real("warn_days"), // Days before dueAt at which a date-tracked need is worth planning for.
+  urgentDays: real("urgent_days"), // Days before dueAt at which a date-tracked need is urgent.
+  serviceIntervalDays: real("service_interval_days"), // How far a service check-in rolls dueAt forward; null means by hand only.
 });
 
 /** Rate history per need; the current rate is the latest effectiveFrom. Derived rows only exist via an accepted suggestion. */
@@ -159,6 +164,7 @@ export const checkIns = sqliteTable(
       .notNull()
       .references(() => users.id),
     clientId: text("client_id").unique(), // Client-generated id so an offline queue replay never records twice.
+    prevDueAt: text("prev_due_at"), // The due date this check-in rolled forward, so undo restores it exactly.
     occurredAt: text("occurred_at").notNull(),
     createdAt: text("created_at").notNull(),
   },

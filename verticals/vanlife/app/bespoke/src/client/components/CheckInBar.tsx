@@ -1,5 +1,5 @@
 import { useState, type JSX } from "react";
-import { byUrgencyThenDeadline, type NeedStateView } from "./NeedsStrip.js";
+import { byUrgencyThenDeadline, dueDateLabel, isDateTracked, type NeedStateView } from "./NeedsStrip.js";
 
 export interface CheckInRequest {
   needId: number;
@@ -117,25 +117,38 @@ export function CheckInBar(props: {
     : props.states;
   return (
     <div className="vl-checkin-bar">
-      {shown.map((s) => (
-        <span key={s.need.id} style={{ display: "inline-flex" }}>
+      {shown.map((s) =>
+        // A date-tracked need has no quantity to refine — servicing it just rolls
+        // its due date forward — so it gets the one-tap button and nothing else.
+        isDateTracked(s) ? (
           <button
+            key={s.need.id}
             className={`vl-checkin-btn${s.urgency === "urgent" ? " vl-urgent-btn" : ""}`}
             onClick={() => props.onCheckIn({ needId: s.need.id, kind: "service" })}
-            title={`Record: full ${s.need.title.toLowerCase()} service`}
+            title={`Record: ${s.need.title.toLowerCase()} done${s.need.dueAt ? ` (was due ${dueDateLabel(s.need.dueAt)})` : ""}`}
           >
-            {SERVICE_VERBS[s.need.key] ?? `${s.need.title} done`}
+            {s.need.title} done
           </button>
-          <button
-            className="vl-checkin-btn"
-            style={{ marginLeft: 2, padding: "6px 8px" }}
-            onClick={() => setModal(s)}
-            title="Partial amount / correction"
-          >
-            …
-          </button>
-        </span>
-      ))}
+        ) : (
+          <span key={s.need.id} style={{ display: "inline-flex" }}>
+            <button
+              className={`vl-checkin-btn${s.urgency === "urgent" ? " vl-urgent-btn" : ""}`}
+              onClick={() => props.onCheckIn({ needId: s.need.id, kind: "service" })}
+              title={`Record: full ${s.need.title.toLowerCase()} service`}
+            >
+              {SERVICE_VERBS[s.need.key] ?? `${s.need.title} done`}
+            </button>
+            <button
+              className="vl-checkin-btn"
+              style={{ marginLeft: 2, padding: "6px 8px" }}
+              onClick={() => setModal(s)}
+              title="Partial amount / correction"
+            >
+              …
+            </button>
+          </span>
+        ),
+      )}
       {modal ? <QuantityModal state={modal} onSubmit={props.onCheckIn} onClose={() => setModal(null)} /> : null}
     </div>
   );
