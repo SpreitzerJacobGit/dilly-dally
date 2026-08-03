@@ -38,6 +38,40 @@ export const CATEGORY_COLORS: Record<string, string> = {
   other: "#64748b",
 };
 
+/**
+ * Human-readable names for the place categories. Keyed identically to
+ * CATEGORY_COLORS — the legend walks that object's keys, so the two stay in
+ * lockstep and a category added to one without the other shows up immediately
+ * as a missing label rather than a missing dot.
+ */
+export const CATEGORY_LABELS: Record<string, string> = {
+  campground: "Campground",
+  "water-fill": "Water fill",
+  "dump-station": "Dump station",
+  laundry: "Laundry",
+  grocery: "Grocery",
+  fuel: "Fuel",
+  "ev-charge": "EV charging",
+  restroom: "Restroom",
+  hike: "Hiking",
+  boulder: "Bouldering",
+  bike: "Biking",
+  scenic: "Scenic",
+  family: "Family",
+  other: "Other",
+};
+
+/** Service categories first, then the interest ones — the order they are declared in. */
+export const ALL_CATEGORIES: string[] = Object.keys(CATEGORY_COLORS);
+
 export function roleColor(tier: string): string {
   return ROLE_COLORS[tier] ?? "#64748b";
+}
+
+export function categoryColor(category: string): string {
+  return CATEGORY_COLORS[category] ?? "#64748b";
+}
+
+export function categoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category;
 }

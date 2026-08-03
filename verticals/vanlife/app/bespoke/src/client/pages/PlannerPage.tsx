@@ -12,6 +12,8 @@ import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { DigestView } from "../components/DigestBanner.js";
 import type { TargetTreeNode, DropZone } from "../components/TargetTree.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
+import { readHiddenPoiCategories, writeHiddenPoiCategories } from "../lib/prefs.js";
+import { ALL_CATEGORIES } from "../map/palette.js";
 import { VL_STYLES } from "../styles.js";
 import { PlannerMap } from "../planner/PlannerMap.js";
 import { TripPicker } from "../planner/TripPicker.js";
@@ -71,6 +73,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
   // found (so the map can show them), and the row whose pin is in flight.
   const [needSearch, setNeedSearch] = useState<NeedStateView | null>(null);
   const [sheetPois, setSheetPois] = useState<MapPoiView[]>([]);
+  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(readHiddenPoiCategories);
   const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
   const [modal, setModal] = useState<
     | null
@@ -109,9 +112,37 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
   // Places in view, unless a specific area's suggestions are on screen.
   const showingSuggestions =
     tab === "targets" && selected !== null && !selected.final && selected.radiusMiles > 0;
+  const visibleCategories = useMemo(
+    () => ALL_CATEGORIES.filter((c) => !hiddenCategories.has(c)),
+    [hiddenCategories],
+  );
+  // The categories go to the server as well as to the layer filter. The scan is
+  // capped at 300 rows by popularity, so narrowing it is what makes a rare
+  // category — a dump station, say — actually appear once it is the only thing
+  // asked for, instead of being crowded out by campgrounds and never drawn.
+  // Undefined while nothing is hidden, so the unfiltered query keeps one cache
+  // entry rather than acquiring a second identical one.
+  //
+  // This names the visible categories where the layer filter names the hidden
+  // ones, so a row whose category is outside the palette entirely would be
+  // fetched but not drawn. The column is a closed enum in data-model.yaml, so
+  // there is no such row to worry about.
   const poisQ = trpc.pois.byBbox.useQuery(
-    { bbox: viewport?.bbox ?? { south: 0, west: 0, north: 0, east: 0 }, limit: 300 },
-    { enabled: viewport !== null && viewport.zoom >= 7 && !showingSuggestions, placeholderData: (prev) => prev },
+    {
+      bbox: viewport?.bbox ?? { south: 0, west: 0, north: 0, east: 0 },
+      limit: 300,
+      categories: hiddenCategories.size === 0 ? undefined : visibleCategories,
+    },
+    {
+      // An empty category list would reach the server as "no filter" and bring
+      // back everything, so nothing-visible does not ask.
+      enabled:
+        viewport !== null &&
+        viewport.zoom >= 7 &&
+        !showingSuggestions &&
+        visibleCategories.length > 0,
+      placeholderData: (prev) => prev,
+    },
   );
   const poiDetailQ = trpc.pois.byId.useQuery({ id: poiDetailId ?? 0 }, { enabled: poiDetailId !== null });
 
@@ -373,6 +404,20 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
         onSettled: () => setPendingPoiId(null),
       },
     );
+  }
+
+  /** Legend toggles. The set is replaced rather than mutated so the map sees a change. */
+  function toggleCategory(category: string): void {
+    const next = new Set(hiddenCategories);
+    if (!next.delete(category)) next.add(category);
+    writeHiddenPoiCategories(next);
+    setHiddenCategories(next);
+  }
+
+  function setAllCategories(visible: boolean): void {
+    const next = visible ? new Set<string>() : new Set(ALL_CATEGORIES);
+    writeHiddenPoiCategories(next);
+    setHiddenCategories(next);
   }
 
   const mapRoutes: CandidateRouteView[] = tab === "today" ? candidates : [];
@@ -670,9 +715,20 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
               ? `Places that can service ${needSearch.need.title}`
               : showingSuggestions
                 ? `Places inside ${selected?.name ?? "the selected Target"}`
-                : "Places in view"
+                : // An empty map because of the filter must say so. Silence here
+                  // reads as "there is nothing out here", which is the one thing
+                  // this app is not allowed to imply.
+                  visibleCategories.length === 0
+                  ? "All place types hidden"
+                  : hiddenCategories.size > 0
+                    ? `Places in view — ${String(visibleCategories.length)} of ${String(ALL_CATEGORIES.length)} types`
+                    : "Places in view"
           }
           poiMinZoom={searchOpen ? 0 : 7}
+          hiddenCategories={hiddenCategories}
+          poisFilterable={!searchOpen && !showingSuggestions}
+          onToggleCategory={toggleCategory}
+          onSetAllCategories={setAllCategories}
           position={tripQ.data?.position ?? null}
           origin={
             tripQ.data

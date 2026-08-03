@@ -479,6 +479,22 @@ export function MapView(props: MapViewProps): JSX.Element {
     map.setLayerZoomRange("pois-dots", props.poiMinZoom ?? 7, 24);
   }, [props.poiMinZoom, ready]);
 
+  // Category filter. Done on the layer rather than by rebuilding the source so
+  // a toggle repaints on the next frame — the query that narrows the fetch is
+  // in flight at the same time, and the dots must not wait for it.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    if (!map.getLayer("pois-dots")) return;
+    const hidden = props.hiddenCategories;
+    map.setFilter(
+      "pois-dots",
+      hidden === undefined || hidden.size === 0
+        ? null
+        : (["!", ["in", ["get", "category"], ["literal", [...hidden]]]] as unknown as never),
+    );
+  }, [props.hiddenCategories, ready]);
+
   return (
     <div style={{ position: "relative", width: "100%", height: props.heightStyle }}>
       <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
