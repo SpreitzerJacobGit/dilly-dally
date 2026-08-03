@@ -131,7 +131,7 @@ docker @gdal ogr2ogr -f GPKG -update -append /w/out/legal_combined.gpkg /w/out/u
   -clipdst $West $South $East $North -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
 if ($LASTEXITCODE -ne 0) { throw "USFS combine failed" }
 
-Write-Host "== Tile to PMTiles =="
+Write-Host "== Tile to PMTiles (slowest step — roughly 2.5 hours) =="
 # GDAL writes PMTiles directly, so there is no MBTiles step and no pmtiles binary
 # on the host. z12 is the floor at which a 300 ft corridor is still a few pixels
 # wide; MapLibre overzooms past it rather than blanking.

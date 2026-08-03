@@ -9,6 +9,11 @@
  * would be the same lie as showing category checkboxes over a set of places the
  * filter does not apply to.
  *
+ * Asking is also the only reliable test. A missing file under /tiles does not
+ * 404: it reaches the SPA's not-found handler and comes back as index.html with
+ * a 200, which would reach MapLibre as a corrupt archive rather than an absent
+ * one. This listing is the difference between "not installed" and "broken".
+ *
  * The request is shared: several components ask the same question on the same
  * screen, and this is a file listing that changes only when someone re-runs the
  * data prep.

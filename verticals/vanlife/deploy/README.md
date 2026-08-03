@@ -53,8 +53,13 @@ Notes:
 - GDAL must be the **full** image (`ubuntu-full-latest`). `alpine-small` has no GEOS, so
   `ST_Buffer` silently yields nulls. GDAL 3.14 writes PMTiles directly, so there is no
   tippecanoe step and no pmtiles binary needed on the host.
-- The buffer/dissolve is the slow part (GEOS over ~110k road segments, ~10 min). The whole
-  run is roughly 20–30 minutes on a warm cache.
+- **This takes about three hours.** Measured on a first full run: ~2 min filter/reproject,
+  ~13 min buffer + dissolve (GEOS over ~110k road segments), ~8 min clip/simplify/makevalid,
+  and ~2.5 hours for the tiling pass, which is by far the slowest step. Start it and leave it.
+  GDAL warns that a few dense tiles exceeded 500 kB and were encoded at lower resolution;
+  that is the tiler degrading gracefully, not an error.
+- The finished archive is ~150 MB (z5–12, ~55k tiles) — small beside the 5 GB basemap on
+  the same volume.
 - Output is clipped to the same bbox as the basemap (`-125.5,31.0,-102.0,49.5`). Shading
   legality where there is no basemap and no routing graph would claim coverage the rest of
   the app does not have. Override with `-West/-South/-East/-North`.

@@ -162,10 +162,14 @@ export function MapView(props: MapViewProps): JSX.Element {
   const [basemapError, setBasemapError] = useState<string | null>(null);
   const [legalError, setLegalError] = useState<string | null>(null);
   /**
-   * Null until /tiles/status answers; false means the archive was never
-   * installed. Asked before the style is pointed at it, so a van that never ran
-   * the overlay prep gets a quiet correct map rather than a tile 404 on every
-   * pan — which MapLibre would report through the same channel as a broken basemap.
+   * Null until /tiles/status answers; false means the archive was never installed.
+   *
+   * Asking first is load-bearing, not tidiness. An unknown path under /tiles
+   * does not 404 — it falls through to the SPA's not-found handler and returns
+   * index.html with a 200, so pointing the style at a missing archive feeds
+   * MapLibre HTML where it expects PMTiles and yields a parse error on every
+   * pan. Confirming the file exists is the only way to tell "never installed"
+   * apart from "broken", and it keeps the former completely quiet.
    */
   const legalPresent = useTileArchivePresent(LEGAL_ARCHIVE);
   const propsRef = useRef(props);
