@@ -3,6 +3,12 @@ import { DataTable } from "@elements/shell-crud-tables";
 import { trpc } from "../trpc.js";
 import type { PageUser } from "../index.js";
 import { FormModal } from "../components/FormModal.js";
+import { readCellSignalManifest, useTilesStatus } from "../lib/cellSignal.js";
+import {
+  cellSignalRefreshView,
+  readStatusFile,
+  readWatcherFile,
+} from "../lib/cellSignalHost.js";
 import { VL_STYLES } from "../styles.js";
 
 type SettingsForm =
@@ -13,6 +19,7 @@ type SettingsForm =
   | "add-operator"
   | "default-drive-hours"
   | "trip-drive-hours"
+  | "fcc-credentials"
   | null;
 
 export function SettingsPage(_props: { user: PageUser }): JSX.Element {
@@ -37,6 +44,56 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
   });
   const refreshNow = trpc.sources.poiSources.refreshNow.useMutation({
     onSuccess: (r) => setToast(r.started ? "Refresh started" : `Not started: ${r.reason ?? "unknown"}`),
+  });
+
+  const cell = trpc.sources.cellSignal.status.useQuery();
+  const tiles = useTilesStatus();
+  const saveFcc = trpc.sources.cellSignal.saveCredentials.useMutation({
+    onSuccess: () => {
+      void utils.sources.cellSignal.status.invalidate();
+      setToast("FCC credentials saved and written to the data volume");
+    },
+    onError: (e) => setToast(e.message),
+  });
+  const clearFcc = trpc.sources.cellSignal.clearCredentials.useMutation({
+    onSuccess: () => {
+      void utils.sources.cellSignal.status.invalidate();
+      setToast("FCC credentials cleared — the installed overlay keeps working, it just will not refresh");
+    },
+    onError: (e) => setToast(e.message),
+  });
+  const testFcc = trpc.sources.cellSignal.testCredentials.useMutation({
+    // Never "your credentials are wrong": the endpoint and header names are
+    // unverified, so a 404 from a wrong path looks exactly like a bad token.
+    onSuccess: (r) =>
+      setToast(
+        r.ok
+          ? `FCC accepted the credentials — current availability date ${r.asOfDate ?? "unknown"}`
+          : `Could not confirm: ${r.error}`,
+      ),
+    onError: (e) => setToast(e.message),
+  });
+  const requestRefresh = trpc.sources.cellSignal.requestRefresh.useMutation({
+    onSuccess: (r) => {
+      void utils.sources.cellSignal.status.invalidate();
+      setToast(
+        r.requested
+          ? "Refresh requested — the van server picks it up on its next check"
+          : `Not requested: ${r.reason}`,
+      );
+    },
+    onError: (e) => setToast(e.message),
+  });
+
+  const coverage = readCellSignalManifest(tiles.status);
+  const coverageInstalled = tiles.status?.archives.includes("cell-signal.pmtiles") === true;
+  const refresh = cellSignalRefreshView({
+    now: cell.data?.now ?? new Date().toISOString(),
+    hasCredentials: cell.data?.hasCredentials ?? false,
+    tokenExported: cell.data?.tokenExported ?? false,
+    watcher: readWatcherFile(cell.data?.watcher),
+    run: readStatusFile(cell.data?.run),
+    pendingRequestId: cell.data?.pendingRequestId ?? null,
   });
 
   const ntfy = trpc.sources.ntfy.status.useQuery();
@@ -165,6 +222,70 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
         >
           Import dataset (JSON)
         </button>
+      </div>
+
+      <h3>Cell coverage</h3>
+      <p style={{ color: "#666", fontSize: ".9rem" }}>
+        The coverage overlay is built on the van server from the FCC&rsquo;s mobile availability
+        filings, not by this app. Credentials are stored here and handed to the refresh through
+        the data volume. The refresh only runs while the van server is signed in.
+      </p>
+      <p style={{ fontSize: ".9rem" }}>
+        Coverage data:{" "}
+        <strong>
+          {!tiles.loaded
+            ? "checking…"
+            : !coverageInstalled
+              ? "none installed"
+              : `as of ${coverage?.asOfDate ?? "an unknown date"}`}
+        </strong>
+        {coverageInstalled && coverage?.lastError !== null && coverage?.lastError !== undefined ? (
+          <>
+            {" — "}
+            <span className="vl-warning">the last refresh failed: {coverage.lastError}</span>
+          </>
+        ) : coverageInstalled && coverage?.lastRun ? (
+          <span style={{ color: "#666" }}>
+            {" "}
+            · last checked {coverage.lastRun.slice(0, 16).replace("T", " ")}
+          </span>
+        ) : null}
+      </p>
+      <p style={{ fontSize: ".9rem" }}>
+        FCC account: <strong>{cell.data?.username ?? "none stored"}</strong>
+        {cell.data?.hasToken ? " (token stored)" : ""}
+      </p>
+      <p className={refresh.tone === "warn" ? "vl-warning" : undefined} style={{ fontSize: ".9rem" }}>
+        {refresh.detail}
+      </p>
+      <div style={{ display: "flex", gap: 8, margin: "8px 0", flexWrap: "wrap" }}>
+        <button className="vl-checkin-btn" onClick={() => setActiveForm("fcc-credentials")}>
+          {cell.data?.hasCredentials ? "Change FCC credentials" : "Set FCC credentials"}
+        </button>
+        {cell.data?.hasCredentials ? (
+          <button className="vl-checkin-btn" onClick={() => testFcc.mutate()}>
+            Test credentials
+          </button>
+        ) : null}
+        {refresh.canRequest ? (
+          <button className="vl-checkin-btn" onClick={() => requestRefresh.mutate({ force: false })}>
+            Refresh now
+          </button>
+        ) : null}
+        <button
+          className="vl-checkin-btn"
+          onClick={() => {
+            void utils.sources.cellSignal.status.invalidate();
+            tiles.reload();
+          }}
+        >
+          Check again
+        </button>
+        {cell.data?.hasCredentials ? (
+          <button className="vl-checkin-btn" onClick={() => clearFcc.mutate()}>
+            Clear credentials
+          </button>
+        ) : null}
       </div>
 
       <h3>Push notifications (ntfy)</h3>
@@ -327,6 +448,29 @@ export function SettingsPage(_props: { user: PageUser }): JSX.Element {
           onSubmit={(v) =>
             saveNtfy.mutate({ serverUrl: v.server!, topic: v.topic!, token: v.token ? v.token : undefined })
           }
+          onClose={() => setActiveForm(null)}
+        />
+      ) : null}
+      {activeForm === "fcc-credentials" ? (
+        <FormModal
+          title="FCC credentials"
+          hint="Register at broadbandmap.fcc.gov/login and mint an API token. Both fields are saved together — the token is minted for one username, so keeping a stale one paired with a new account would fail hours later inside a scheduled task."
+          fields={[
+            {
+              name: "username",
+              label: "FCC username (email)",
+              defaultValue: cell.data?.username ?? "",
+              required: true,
+            },
+            {
+              name: "token",
+              label: "API token",
+              type: "password",
+              required: true,
+              hint: "Stored on the van server and written to the data volume for the refresh. Never shown again.",
+            },
+          ]}
+          onSubmit={(v) => saveFcc.mutate({ username: v.username!, token: v.token! })}
           onClose={() => setActiveForm(null)}
         />
       ) : null}

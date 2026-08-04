@@ -10,7 +10,13 @@
 # roughly twice a year, so almost every run should exit in seconds having
 # downloaded nothing.
 #
-# One-time setup:
+# Credentials come from the app by default — Settings → Cell coverage writes
+# them onto the internal data volume, which is the only private channel the
+# container has (the tiles volume is served over HTTP, so a token can never go
+# there). The repo-root .fcc-token still works and is what you want before the
+# app is even up. Precedence is in Get-FccAuthHeaders.
+#
+# One-time setup, if you would rather not use the app:
 #   1. Register for an FCC User Registration account and mint an API token at
 #      https://broadbandmap.fcc.gov/login
 #   2. Save it next to the repo root as .fcc-token (gitignored):
@@ -26,6 +32,13 @@ param(
   [string]$TokenFile = (Join-Path $PSScriptRoot "../../../.fcc-token"),
   [string]$ProvidersFile = (Join-Path $PSScriptRoot "cell-signal-providers.json"),
   [string]$Volume = "vanlife-tiles",
+  # The app's private channel to the host. NOT "vanlife-data": compose.yaml
+  # declares it without `external:`, so Compose prefixes it with the project
+  # name, and vanlife-tiles/vanlife-osrm keep their literal names only because
+  # they ARE external. Getting this wrong is silent — `docker run -v <name>`
+  # CREATES a volume that does not exist rather than failing, and everything
+  # downstream then reads an empty directory forever.
+  [string]$DataVolume = "vanlife_vanlife-data",
   # The US West bbox the basemap is extracted to. Keep in step with
   # prepare-data.ps1's --bbox, or the overlay will claim coverage off the edge
   # of the map, or stop short of it.
@@ -38,6 +51,40 @@ param(
   [switch]$Force
 )
 $ErrorActionPreference = "Stop"
+
+# Whether the caller named a token file explicitly. Captured here because
+# $PSBoundParameters is not visible from inside a function.
+$TokenFileWasGiven = $PSBoundParameters.ContainsKey('TokenFile')
+
+# Docker Desktop does not put its bin directory on PATH for non-interactive
+# shells, and the credential helper lives there too — without it every pull
+# fails with "error getting credentials" rather than anything about Docker.
+# This script is the one that actually runs unattended, so it needs this more
+# than prepare-legal-overlay.ps1 does.
+$dockerBin = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin"
+if (Test-Path (Join-Path $dockerBin "docker.exe")) { $env:PATH = "$dockerBin;$env:PATH" }
+
+# Pre-flight rather than discovering it at the first docker call. Get-InstalledManifest
+# used to run before the try block below, so a missing daemon killed the script
+# where nothing could record it — the one failure the app could never see.
+function Assert-Docker {
+  if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "docker not found. Install Docker Desktop, or add its resources\bin to PATH."
+  }
+  docker volume inspect $Volume 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "The tiles volume '$Volume' does not exist. Run prepare-data.ps1 first, and check the Docker daemon is running."
+  }
+}
+
+# The weekly task and an app-triggered run are different scheduled tasks, so
+# -MultipleInstances cannot keep them apart. Nothing stopped a hand-run
+# colliding with the weekly task either.
+function Test-RefreshRunning {
+  $me = $PID
+  $procs = Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" -ErrorAction SilentlyContinue
+  return @($procs | Where-Object { $_.ProcessId -ne $me -and $_.CommandLine -like "*refresh-cell-signal.ps1*" }).Count -gt 0
+}
 
 # ── FCC Broadband Data Collection API ────────────────────────────────────────
 # UNVERIFIED — confirm before the first unattended run.
@@ -59,17 +106,73 @@ $FccDownloadUrl = "$FccBase/downloads/downloadFile/availability"
 $ArchiveName = "cell-signal.pmtiles"
 $ManifestName = "cell-signal.json"
 
+# Pulls the credentials the app saved, without ever putting them on host disk.
+#
+# Deliberately no temp file: Task Scheduler kills a run at its execution time
+# limit without running `finally`, and so does a reboot, so a temp file holding
+# an API token is a secret with no reliable cleanup. base64 straight into
+# memory instead — the same trick Set-Manifest uses in the other direction.
+# Only the path crosses on the command line; the secret comes back on stdout.
+#
+# `base64 | tr -d '\n'` rather than `base64 -w0`: busybox does not carry -w in
+# every build, and this only ever runs against alpine.
+function Get-VolumeToken {
+  docker volume inspect $DataVolume 2>&1 | Out-Null
+  # $null rather than throwing: "the app has never saved credentials" is an
+  # ordinary state and the caller falls through to the file.
+  if ($LASTEXITCODE -ne 0) { return $null }
+  $b64 = docker run --rm -v "${DataVolume}:/data" alpine `
+    sh -c "base64 < /data/cell-signal/fcc-token.json 2>/dev/null | tr -d '\n'"
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($b64)) { return $null }
+  try {
+    return [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b64.Trim())) | ConvertFrom-Json
+  } catch {
+    # A corrupt file must not read as "no credentials" — that would send the
+    # operator to Settings to re-enter a token that is already there. Name it.
+    throw "The FCC credentials on $DataVolume (/data/cell-signal/fcc-token.json) are not valid JSON. Re-save them in Settings."
+  }
+}
+
 function Get-FccAuthHeaders {
-  if (-not (Test-Path $TokenFile)) {
-    throw "No FCC credentials at $TokenFile. See the header of this script for the one-time setup."
+  $creds = $null
+  $source = $null
+  # The app wins over the repo-root file when both exist — it is the newer
+  # decision — unless -TokenFile was passed explicitly, in which case the
+  # operator has named a file and means it.
+  if (-not $TokenFileWasGiven) {
+    $creds = Get-VolumeToken
+    if ($creds) { $source = "the app (Settings -> Cell coverage)" }
   }
-  $creds = Get-Content $TokenFile -Raw | ConvertFrom-Json
+  if (-not $creds -and (Test-Path $TokenFile)) {
+    $creds = Get-Content $TokenFile -Raw | ConvertFrom-Json
+    $source = $TokenFile
+  }
+  if (-not $creds) {
+    # This string reaches three places someone might be looking: the tiles
+    # manifest, the watcher's status.json (so the Settings page shows it right
+    # where the button was pressed), and Task Scheduler's last result. Name
+    # both places it looked and both ways to fix it.
+    throw ("No FCC credentials. The app has saved none to $DataVolume " +
+      "(/data/cell-signal/fcc-token.json), and there is no file at $TokenFile. " +
+      "Add them in the app under Settings -> Cell coverage, or create that file " +
+      "as {`"username`":`"...`",`"token`":`"...`"}.")
+  }
   if (-not $creds.username -or -not $creds.token) {
-    throw "$TokenFile must contain both 'username' and 'token'."
+    throw "The FCC credentials from $source must contain both 'username' and 'token'."
   }
+  Write-Host "Using FCC credentials from $source."
+  # Remembered so anything written to the manifest or to stderr can be scrubbed
+  # of it first. Nothing here is known to echo a header, but an error message is
+  # the one string in this script that travels to a browser.
+  $script:TokenSecret = $creds.token
   # UNVERIFIED header names — the BDC API authenticates with the registered
   # username plus the token, not a bearer header.
   return @{ "username" = $creds.username; "hash_value" = $creds.token }
+}
+
+function Remove-Secret([string]$Text) {
+  if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($script:TokenSecret)) { return $Text }
+  return $Text.Replace($script:TokenSecret, "***")
 }
 
 # Reads the manifest already on the volume, or $null. This is how the script
@@ -115,10 +218,24 @@ function Get-FccFiles([hashtable]$Headers, [string]$AsOfDate) {
   return $all
 }
 
-$installed = Get-InstalledManifest
-$previousSuccess = if ($installed) { $installed.lastSuccess } else { $null }
+# Pre-initialised so the catch block can still write a manifest even when the
+# failure happened before either was read.
+$installed = $null
+$previousSuccess = $null
 
 try {
+  Assert-Docker
+
+  if (Test-RefreshRunning) {
+    # Exit 0, not 1: another refresh already doing the work is the desired end
+    # state, not a fault worth alarming anyone about.
+    Write-Host "Another refresh is already running; leaving it alone."
+    exit 0
+  }
+
+  $installed = Get-InstalledManifest
+  $previousSuccess = if ($installed) { $installed.lastSuccess } else { $null }
+
   $headers = Get-FccAuthHeaders
   $asOf = Get-FccCurrentAsOfDate -Headers $headers
   Write-Host "FCC current availability date: $asOf"
@@ -136,6 +253,9 @@ try {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
   }
 
+  # watch-cell-signal.ps1 scrapes lines of the form "== ... ==" to report which
+  # step a run is on. Renaming them degrades that display to "running" and
+  # breaks nothing else.
   Write-Host "== Downloading FCC mobile availability ($($States.Count) states) =="
   $files = Get-FccFiles -Headers $headers -AsOfDate $asOf
   if ($files.Count -eq 0) { throw "FCC listed no mobile broadband files for $asOf." }
@@ -192,9 +312,15 @@ done
 catch {
   # Record and rethrow: the manifest is what makes a silently failing scheduled
   # task visible, and the non-zero exit is what makes Task Scheduler show it.
-  $message = $_.Exception.Message
-  Set-Manifest -AsOfDate $(if ($installed) { $installed.asOfDate } else { $null }) `
-    -LastSuccess $previousSuccess -LastError $message
+  $message = Remove-Secret $_.Exception.Message
+  # Best effort: if the failure WAS Docker, this cannot land either, and the
+  # watcher's status.json is the only place the operator will see it.
+  try {
+    Set-Manifest -AsOfDate $(if ($installed) { $installed.asOfDate } else { $null }) `
+      -LastSuccess $previousSuccess -LastError $message
+  } catch {
+    Write-Host "Could not record the failure on $Volume - Docker is likely unreachable."
+  }
   Write-Error "Cell signal refresh failed: $message"
   exit 1
 }

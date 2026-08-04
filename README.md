@@ -36,7 +36,10 @@ most of the design:
   miles of fuel, six days of waste-water capacity — and stored as percent per day or mile.
 - **Degradation is visible, never silent.** Every POI source reports itself in exactly one
   honest state (unconfigured / never-checked / healthy / erroring, with the error and time).
-  A failed push shows its error rather than the app claiming a digest was sent.
+  A failed push shows its error rather than the app claiming a digest was sent. A coverage
+  refresh triggered from Settings is carried out by a small agent on the host — the app runs
+  in a container and cannot run host processes — and the page says plainly when no agent has
+  responded rather than showing "queued" forever.
 
 With no uplink, the dashboard, planning, map, check-ins, and digest all keep working. Only
 external place refreshing and ntfy push delivery degrade, and both say so.
