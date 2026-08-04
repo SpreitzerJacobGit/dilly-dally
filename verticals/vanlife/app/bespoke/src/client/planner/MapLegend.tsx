@@ -6,6 +6,11 @@ import {
   PROJECTED_COLOR,
   ROLE_LABELS,
   roleColor,
+  signalColor,
+  signalLabel,
+  SIGNAL_CARRIERS,
+  SIGNAL_SOURCE_LABEL,
+  SIGNAL_TIERS,
 } from "../map/palette.js";
 
 /**
@@ -35,6 +40,21 @@ export interface MapLegendProps {
   poiSourceLabel: string;
   onToggle: (category: string) => void;
   onSetAll: (visible: boolean) => void;
+  /** Whether the cell signal overlay is drawn. */
+  signalOn: boolean;
+  /** Which carrier it colors by — one of the SIGNAL_CARRIERS keys. */
+  signalCarrier: string;
+  /**
+   * Why the overlay cannot be shown, or null when it can. The archive is
+   * provisioned by a scheduled refresh and is legitimately absent on a fresh
+   * install, so the reason is stated in place of the controls rather than
+   * leaving a switch that would silently do nothing.
+   */
+  signalUnavailable: string | null;
+  /** When the installed coverage data was current, if it is installed. */
+  signalAsOf: string | null;
+  onToggleSignal: (on: boolean) => void;
+  onSignalCarrier: (carrier: string) => void;
 }
 
 export function MapLegend(props: MapLegendProps): JSX.Element {
@@ -91,6 +111,52 @@ export function MapLegend(props: MapLegendProps): JSX.Element {
               </div>
             </>
           ) : null}
+
+          <div className="vl-legend-section">
+            <span>Cell signal</span>
+          </div>
+          {props.signalUnavailable !== null ? (
+            <div className="vl-legend-note">{props.signalUnavailable}</div>
+          ) : (
+            <>
+              <label className="vl-legend-row">
+                <input
+                  type="checkbox"
+                  checked={props.signalOn}
+                  onChange={(e) => props.onToggleSignal(e.target.checked)}
+                />
+                Show coverage
+              </label>
+              <div className="vl-legend-carrier">
+                <select
+                  aria-label="Carrier"
+                  value={props.signalCarrier}
+                  disabled={!props.signalOn}
+                  onChange={(e) => props.onSignalCarrier(e.target.value)}
+                >
+                  {SIGNAL_CARRIERS.map((carrier) => (
+                    <option key={carrier.key} value={carrier.key}>
+                      {carrier.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {/* The ramp only means anything while it is on the map, and the
+                  switch above it does not move when these appear. */}
+              {props.signalOn
+                ? SIGNAL_TIERS.map((tier) => (
+                    <div key={tier} className="vl-legend-row">
+                      <span className="vl-legend-swatch" style={{ background: signalColor(tier) }} />
+                      {signalLabel(tier)}
+                    </div>
+                  ))
+                : null}
+              <div className="vl-legend-source">
+                {SIGNAL_SOURCE_LABEL}
+                {props.signalAsOf !== null ? ` · as of ${props.signalAsOf}` : ""}
+              </div>
+            </>
+          )}
 
           <div className="vl-legend-section">
             <span>Routes</span>

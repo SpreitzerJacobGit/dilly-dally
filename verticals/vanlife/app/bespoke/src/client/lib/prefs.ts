@@ -15,6 +15,8 @@ const DIGEST_DISMISSED = (userKey: string): string => `vl.digestDismissed.${user
 /** Check-ins recorded with no uplink, waiting to be replayed. */
 export const CHECKIN_QUEUE_KEY = "vl.checkinQueue";
 const POI_CATEGORIES_HIDDEN = "vl.poiCategoriesHidden";
+const SIGNAL_OVERLAY = "vl.signalOverlay";
+const SIGNAL_CARRIER = "vl.signalCarrier";
 
 function read(key: string): string | null {
   try {
@@ -75,4 +77,35 @@ export function readHiddenPoiCategories(): Set<string> {
 
 export function writeHiddenPoiCategories(hidden: Set<string>): void {
   write(POI_CATEGORIES_HIDDEN, hidden.size === 0 ? null : JSON.stringify([...hidden]));
+}
+
+/**
+ * Whether the cell signal overlay is switched on.
+ *
+ * Off unless explicitly stored, so the absent key and the off state are the
+ * same thing. The overlay tints the entire map, and someone who has never
+ * asked for it should not find their routes sitting under a wash they did not
+ * choose — the opposite polarity to the category filter above, for the same
+ * reason: whichever state is the safe default is the one an empty key means.
+ */
+export function readSignalOverlay(): boolean {
+  return read(SIGNAL_OVERLAY) === "1";
+}
+
+export function writeSignalOverlay(on: boolean): void {
+  write(SIGNAL_OVERLAY, on ? "1" : null);
+}
+
+/**
+ * Which carrier the overlay colors by. Null means the caller's default rather
+ * than a stored choice — the value is validated against the palette on read,
+ * because a carrier key retired between releases must not survive here and
+ * paint the whole map as "no service".
+ */
+export function readSignalCarrier(): string | null {
+  return read(SIGNAL_CARRIER);
+}
+
+export function writeSignalCarrier(carrier: string | null): void {
+  write(SIGNAL_CARRIER, carrier);
 }

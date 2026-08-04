@@ -1,8 +1,9 @@
 # Dilly-Dally — deployment notes (authored)
 
 `Dockerfile` and `compose.yaml` are generated from the assembly manifest — never edit them.
-This file, `prepare-data.ps1`, and the repository-root `.dockerignore` are authored and
-survive regeneration.
+This file, `prepare-data.ps1`, `refresh-cell-signal.ps1`,
+`install-cell-signal-schedule.ps1`, `build-cell-signal.ts`, `cell-signal-tiers.ts`, and the
+repository-root `.dockerignore` are authored and survive regeneration.
 
 The build context is the repository root (`compose.yaml` → `build.context: ../../..`), so
 the root `.dockerignore` is load-bearing: without it every build ships the local scratch
@@ -26,6 +27,76 @@ which must wipe the database volume but never the multi-gigabyte map data.
 2. `powershell verticals/vanlife/deploy/prepare-data.ps1 -SourceDir <scratch dir>`
    - OSRM preprocessing (MLD) needs roughly 10+ GB of Docker memory for us-west.
    - Refreshing the map later = re-download + re-run; the app keeps running meanwhile.
+
+## Cell signal overlay (optional)
+
+A toggle-able map overlay colouring the map by expected cell coverage, from the FCC's
+Broadband Data Collection mobile availability filings. Entirely optional: with no archive
+installed the legend says so and withholds the switch, and nothing else changes.
+
+Treat it as **modelled, not measured** — it is what the carriers filed, and it is well
+known to be optimistic. The legend says so on screen for the same reason.
+
+### One-time setup
+
+1. Register for an FCC User Registration account and mint an API token at
+   <https://broadbandmap.fcc.gov/login>.
+2. Save it at the repository root as `.fcc-token` (gitignored):
+   ```json
+   { "username": "you@example.com", "token": "..." }
+   ```
+3. Build the first archive by hand — it takes a while, and you want to watch the first one:
+   ```
+   pwsh -File verticals/vanlife/deploy/refresh-cell-signal.ps1 -Force
+   ```
+4. Register the schedule so it keeps itself current:
+   ```
+   pwsh -File verticals/vanlife/deploy/install-cell-signal-schedule.ps1
+   ```
+
+### How it stays current
+
+The FCC publishes mobile availability **by provider × state × technology — there is no
+nationwide file**, so a hand-driven refresh of the 11 western states across three carriers
+and two technologies is ~66 downloads. That is why this is scheduled rather than manual.
+
+`refresh-cell-signal.ps1` checks the FCC's current availability date *before* doing any
+work and exits in seconds if it already has it. The FCC refreshes roughly twice a year, so
+nearly every weekly run is a no-op costing one API call. The archive is built into
+`cell-signal.pmtiles`, installed onto the existing `vanlife-tiles` volume with an atomic
+rename (the server is live and serving byte ranges out of that file), and the app picks it
+up on the next map load.
+
+Because the machine running the task is also the Docker host, nothing is published or
+fetched — the output lands directly where it is served.
+
+### When it goes wrong
+
+Every run writes `cell-signal.json` beside the archive recording `asOfDate`, `lastRun`,
+`lastSuccess` and `lastError`. The app's Status page reads it and shows a **Cell coverage
+data** card. A scheduled task that has been failing since March shows up there as "Stale"
+with the error, rather than only in Event Viewer — a stale overlay that still looks current
+is worse than an absent one.
+
+```
+Start-ScheduledTask   -TaskName 'Dilly-Dally cell signal refresh'
+Get-ScheduledTaskInfo -TaskName 'Dilly-Dally cell signal refresh'
+```
+
+### Before the first unattended run
+
+Three things could not be confirmed while this was written and should be checked once
+against real data — each is flagged in the code at the point it matters:
+
+- **FCC API endpoint paths and auth header names** (`refresh-cell-signal.ps1`, top). The
+  spec PDF is served behind an edge filter that refuses scripted fetches. The endpoints are
+  confirmed to exist and to return 401 without credentials; the exact paths are not.
+- **Column names** in the export (`build-cell-signal.ts` detects them by pattern and prints
+  what it found, failing loudly with the header list if the H3 index column is missing).
+- **Provider names per carrier** (`cell-signal-tiers.ts`). Matched on name rather than the
+  numeric IDs, which move with corporate restructuring. Anything unmatched is reported with
+  counts on the first run — put the leftovers in `cell-signal-providers.json` as
+  `{"<name or id>": "att"}` and re-run.
 
 ## Run
 

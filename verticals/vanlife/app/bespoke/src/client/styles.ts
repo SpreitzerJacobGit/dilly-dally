@@ -140,6 +140,14 @@ export const VL_STYLES = `
 .vl-legend-list label { cursor: pointer; }
 .vl-legend-list input { margin: 0; cursor: pointer; }
 .vl-legend-source { color: #555; margin-top: 4px; }
+/* The signal swatch is a filled block, not the 3px line the routes use — the
+   overlay is an area on the map and the key should read as the same thing. */
+.vl-legend-swatch { width: 16px; height: 12px; border-radius: 2px; border: 1px solid #00000022; }
+.vl-legend-carrier { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.vl-legend-carrier select { font: inherit; font-size: .72rem; padding: 1px 3px; flex: 1; min-width: 0;
+  border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+.vl-legend-carrier select:disabled { color: #999; cursor: not-allowed; }
+.vl-legend-note { color: #777; font-style: italic; margin: 2px 0; }
 
 .vl-popover { position: absolute; z-index: 10; top: 12px; right: 12px; width: 260px;
   background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px;
