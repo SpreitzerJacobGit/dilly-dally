@@ -34,8 +34,11 @@ catalog:
   pmtiles: ^4.4.1
   "@protomaps/basemaps": ^5.7.2
   lucide-react: ^1.28.0
-  # Deploy-time only: regenerates hex geometry from H3 indexes so the coverage
-  # pipeline never has to reproject the FCC's source polygons.
+  # Deploy-time: regenerates hex geometry from H3 indexes so the coverage
+  # pipeline never has to reproject the FCC's source polygons. Also runtime, in
+  # the server's hex lookup — the stay scorer indexes the same grid the coverage
+  # and legality overlays are drawn on, so what it scores and what you see shaded
+  # can never disagree.
   h3-js: ^4.5.0
 
 minimumReleaseAgeExclude:

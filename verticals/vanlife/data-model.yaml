@@ -119,7 +119,7 @@ entities:
         column: category
         type: text
         notNull: true
-        enum: [campground, water-fill, dump-station, laundry, grocery, fuel, ev-charge, restroom, hike, boulder, bike, scenic, family, other]
+        enum: [campground, dispersed, lodging, parking, water-fill, dump-station, laundry, grocery, fuel, ev-charge, restroom, hike, boulder, bike, scenic, family, other]
       - { name: subcategory, column: subcategory, type: text }
       - { name: lat, column: lat, type: real, notNull: true }
       - { name: lng, column: lng, type: real, notNull: true }
@@ -422,7 +422,7 @@ entities:
         column: purpose
         type: text
         notNull: true
-        enum: [drive, resupply, fuel, water, dump, laundry, charge, sight, camp, family]
+        enum: [drive, resupply, fuel, water, dump, laundry, charge, sight, camp, lodging, park, family]
       - { name: etaMinutesFromStart, column: eta_minutes_from_start, type: real, notNull: true }
       - { name: cumMiles, column: cum_miles, type: real, notNull: true }
       - { name: dwellMinutes, column: dwell_minutes, type: real, notNull: true, default: 0 }
@@ -492,6 +492,189 @@ entities:
       - { name: category, column: category, type: text, notNull: true, unique: true }
       - { name: weight, column: weight, type: real, notNull: true, default: 1 }
       - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+  - id: staySites
+    table: stay_sites
+    title: Stay site
+    description: >-
+      Stay-specific facts for a place we could sleep at — one row per Place of a
+      stay category. Separate from pois because most places are not stays, and a
+      table rather than tags JSON because the stay scorer reads it on every replan.
+    feature: stays
+    layout: { x: 660, y: 1020 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: poiId
+        column: poi_id
+        type: integer
+        notNull: true
+        references: { entity: pois, field: id, onDelete: cascade }
+      - name: stayKind
+        column: stay_kind
+        type: text
+        notNull: true
+        enum: [campground, dispersed, lodging, parking]
+      - { name: nightlyCostUsd, column: nightly_cost_usd, type: real, description: "Null is honestly unknown, never 0 — free is 0." }
+      - { name: hookupElectric, column: hookup_electric, type: boolean, notNull: true, default: false }
+      - { name: hookupWater, column: hookup_water, type: boolean, notNull: true, default: false }
+      - { name: dumpStation, column: dump_station, type: boolean, notNull: true, default: false }
+      - { name: showers, column: showers, type: boolean, notNull: true, default: false }
+      - { name: laundryOnSite, column: laundry_on_site, type: boolean, notNull: true, default: false }
+      - name: reservable
+        column: reservable
+        type: text
+        notNull: true
+        default: unknown
+        enum: [required, optional, none, unknown]
+      - name: access
+        column: access
+        type: text
+        notNull: true
+        default: unknown
+        enum: [van-ok, high-clearance, unknown]
+        description: >-
+          Three-valued on purpose: most places carry no road data at all. The
+          van-access filter excludes only high-clearance; unknown passes and is
+          labelled, because dropping it would hide most of the map and passing it
+          silently would promise access nobody has verified.
+      - { name: maxNights, column: max_nights, type: integer, description: Posted stay limit where one is published. }
+      - { name: lastReportedAt, column: last_reported_at, type: text, semantic: iso-datetime }
+      - name: confidence
+        column: confidence
+        type: text
+        notNull: true
+        default: unverified
+        enum: [verified, reported, unverified]
+      - { name: notes, column: notes, type: text }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: stay_sites_poi, fields: [poiId], unique: true }
+      - { name: stay_sites_kind, fields: [stayKind] }
+  - id: stayAvailability
+    table: stay_availability
+    title: Stay availability
+    description: >-
+      What a source said about a given night. Written only by the background
+      refresh job, never during a replan. An unchanged answer bumps fetchedAt and
+      leaves updatedAt alone, or every poll would replan an unchanged day.
+    feature: stays
+    layout: { x: 960, y: 1020 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: poiId
+        column: poi_id
+        type: integer
+        notNull: true
+        references: { entity: pois, field: id, onDelete: cascade }
+      - { name: forDate, column: for_date, type: text, notNull: true, semantic: iso-date }
+      - name: state
+        column: state
+        type: text
+        notNull: true
+        enum: [available, full, closed, unknown]
+      - { name: source, column: source, type: text, notNull: true }
+      - { name: detail, column: detail, type: text }
+      - { name: lastError, column: last_error, type: text }
+      - { name: fetchedAt, column: fetched_at, type: text, notNull: true, semantic: iso-datetime, description: Last real attempt. }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime, description: Last CHANGE of answer — the fingerprint input. }
+    indexes:
+      - { name: stay_availability_poi_date, fields: [poiId, forDate], unique: true }
+  - id: stayOptions
+    table: stay_options
+    title: Stay option
+    description: >-
+      The stays a candidate evaluated, winner and runners-up alike. Routed costs
+      and per-factor scores are computed once here so a weight slider re-ranks
+      with pure arithmetic and no router call.
+    feature: stays
+    layout: { x: 60, y: 1340 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: candidateId
+        column: candidate_id
+        type: integer
+        notNull: true
+        references: { entity: routeCandidates, field: id, onDelete: cascade }
+      - name: poiId
+        column: poi_id
+        type: integer
+        notNull: true
+        references: { entity: pois, field: id, onDelete: cascade }
+      - { name: stayKind, column: stay_kind, type: text, notNull: true }
+      - name: marginalMinutes
+        column: marginal_minutes
+        type: real
+        notNull: true
+        description: >-
+          Cost against continuing to the ideal end point. Negative when the stay
+          sits ahead on the route — an out-and-back detour cannot express that.
+      - { name: toStayMinutes, column: to_stay_minutes, type: real, notNull: true }
+      - { name: fromStayMinutes, column: from_stay_minutes, type: real, notNull: true }
+      - { name: toStayMiles, column: to_stay_miles, type: real, notNull: true }
+      - { name: arrivalIso, column: arrival_iso, type: text, semantic: iso-datetime }
+      - { name: sunsetIso, column: sunset_iso, type: text, semantic: iso-datetime }
+      - { name: factors, column: factors, type: text, notNull: true, semantic: json }
+      - { name: score, column: score, type: real, notNull: true }
+      - name: excludedReason
+        column: excluded_reason
+        type: text
+        description: Null means it survived every filter; set names the filter that ruled it out.
+      - { name: orderIndex, column: order_index, type: integer, notNull: true }
+    indexes:
+      - { name: stay_options_candidate_order, fields: [candidateId, orderIndex] }
+  - id: stayWeights
+    table: stay_weights
+    title: Stay weight
+    description: Per-trip slider weights for stay scoring; zero excludes that factor or kind entirely.
+    feature: stays
+    layout: { x: 360, y: 1340 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: factor, column: factor, type: text, notNull: true }
+      - { name: weight, column: weight, type: real, notNull: true, default: 1 }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: stay_weights_trip_factor, fields: [tripId, factor], unique: true }
+  - id: stayPlans
+    table: stay_plans
+    title: Stay plan
+    description: "\"We have a bed tonight\" — an operator's commitment for one date, which pins the night regardless of score."
+    feature: stays
+    layout: { x: 660, y: 1340 }
+    fields:
+      - { name: id, column: id, type: integer, primaryKey: true, autoIncrement: true }
+      - name: tripId
+        column: trip_id
+        type: integer
+        notNull: true
+        references: { entity: trips, field: id, onDelete: cascade }
+      - { name: planDate, column: plan_date, type: text, notNull: true, semantic: iso-date }
+      - name: poiId
+        column: poi_id
+        type: integer
+        notNull: true
+        references: { entity: pois, field: id, onDelete: cascade }
+      - name: state
+        column: state
+        type: text
+        notNull: true
+        enum: [intended, booked, confirmed, failed]
+      - { name: costUsd, column: cost_usd, type: real }
+      - { name: confirmation, column: confirmation, type: text }
+      - { name: notes, column: notes, type: text }
+      - name: recordedBy
+        column: recorded_by
+        type: integer
+        notNull: true
+        references: { entity: users, field: id }
+      - { name: createdAt, column: created_at, type: text, notNull: true, semantic: iso-datetime }
+      - { name: updatedAt, column: updated_at, type: text, notNull: true, semantic: iso-datetime }
+    indexes:
+      - { name: stay_plans_trip_date, fields: [tripId, planDate], unique: true }
   - id: placeLookups
     table: place_lookups
     title: Place lookup

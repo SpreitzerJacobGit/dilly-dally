@@ -73,7 +73,7 @@ export const pois = sqliteTable(
     source: text("source").notNull(), // overpass | nps | recgov | opencharge | ioverlander | manual
     sourceId: text("source_id").notNull(),
     name: text("name").notNull(),
-    category: text("category").notNull(), // campground | water-fill | dump-station | laundry | grocery | fuel | ev-charge | restroom | hike | boulder | bike | scenic | family | other
+    category: text("category").notNull(), // campground | dispersed | lodging | parking | water-fill | dump-station | laundry | grocery | fuel | ev-charge | restroom | hike | boulder | bike | scenic | family | other
     subcategory: text("subcategory"),
     lat: real("lat").notNull(),
     lng: real("lng").notNull(),
@@ -237,7 +237,7 @@ export const routeLegs = sqliteTable(
       .references(() => waypoints.id, { onDelete: "set null" }),
     needId: integer("need_id")
       .references(() => needs.id, { onDelete: "set null" }), // The need this stop services, when it is a service stop.
-    purpose: text("purpose").notNull(), // drive | resupply | fuel | water | dump | laundry | charge | sight | camp | family
+    purpose: text("purpose").notNull(), // drive | resupply | fuel | water | dump | laundry | charge | sight | camp | lodging | park | family
     etaMinutesFromStart: real("eta_minutes_from_start").notNull(),
     cumMiles: real("cum_miles").notNull(),
     dwellMinutes: real("dwell_minutes").notNull().default(0),
@@ -290,6 +290,149 @@ export const interestWeights = sqliteTable("interest_weights", {
   weight: real("weight").notNull().default(1),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * Stay-specific facts for a place we could sleep at — one row per pois row of a
+ * stay category. A separate table rather than more columns on `pois` because
+ * most places are not stays, and a separate table rather than `pois.tags` JSON
+ * because the stay scorer reads these on every replan and the two-phase query
+ * pattern in engine/pois.ts prefilters in SQL.
+ */
+export const staySites = sqliteTable(
+  "stay_sites",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    poiId: integer("poi_id")
+      .notNull()
+      .references(() => pois.id, { onDelete: "cascade" }),
+    stayKind: text("stay_kind").notNull(), // campground | dispersed | lodging | parking
+    nightlyCostUsd: real("nightly_cost_usd"), // null is honestly unknown, never 0 — free is 0.
+    hookupElectric: integer("hookup_electric", { mode: "boolean" }).notNull().default(false),
+    hookupWater: integer("hookup_water", { mode: "boolean" }).notNull().default(false),
+    dumpStation: integer("dump_station", { mode: "boolean" }).notNull().default(false),
+    showers: integer("showers", { mode: "boolean" }).notNull().default(false),
+    laundryOnSite: integer("laundry_on_site", { mode: "boolean" }).notNull().default(false),
+    reservable: text("reservable").notNull().default("unknown"), // required | optional | none | unknown
+    // Three-valued on purpose: most places carry no road data at all, and the
+    // van-access filter excludes only "high-clearance". "unknown" passes and
+    // says so, because silently dropping it would hide most of the map and
+    // silently passing it would promise access we cannot verify.
+    access: text("access").notNull().default("unknown"), // van-ok | high-clearance | unknown
+    maxNights: integer("max_nights"), // Posted stay limit where one is published.
+    lastReportedAt: text("last_reported_at"), // When a user-reported source last saw it.
+    confidence: text("confidence").notNull().default("unverified"), // verified | reported | unverified
+    notes: text("notes"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("stay_sites_poi").on(table.poiId), index("stay_sites_kind").on(table.stayKind)],
+);
+
+/**
+ * What a source said about a given night, kept apart from the static site row
+ * because it is the one genuinely live input in an offline-first planner.
+ *
+ * Written only by the background refresh job, never during a replan. When a
+ * re-check returns the same answer it bumps `fetchedAt` and leaves `updatedAt`
+ * alone — planStateFingerprint reads the high-water updatedAt, so doing
+ * otherwise would replan an unchanged day on every poll.
+ */
+export const stayAvailability = sqliteTable(
+  "stay_availability",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    poiId: integer("poi_id")
+      .notNull()
+      .references(() => pois.id, { onDelete: "cascade" }),
+    forDate: text("for_date").notNull(),
+    state: text("state").notNull(), // available | full | closed | unknown
+    source: text("source").notNull(),
+    detail: text("detail"),
+    lastError: text("last_error"),
+    fetchedAt: text("fetched_at").notNull(), // Last real attempt — moves on every check.
+    updatedAt: text("updated_at").notNull(), // Last CHANGE of answer — the fingerprint input.
+  },
+  (table) => [uniqueIndex("stay_availability_poi_date").on(table.poiId, table.forDate)],
+);
+
+/**
+ * The stays a candidate evaluated, winner and runners-up alike.
+ *
+ * This is what makes the weight sliders instant: the routed costs and the
+ * per-factor scores are computed once, here, and re-ranking is then pure
+ * arithmetic over these rows with no router call. It also means a site that
+ * turns out to be full or posted has its ranked alternatives already on screen.
+ */
+export const stayOptions = sqliteTable(
+  "stay_options",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    candidateId: integer("candidate_id")
+      .notNull()
+      .references(() => routeCandidates.id, { onDelete: "cascade" }),
+    poiId: integer("poi_id")
+      .notNull()
+      .references(() => pois.id, { onDelete: "cascade" }),
+    stayKind: text("stay_kind").notNull(),
+    // Marginal cost against continuing to the ideal end point — negative when
+    // the stay sits ahead on the route, which an out-and-back detour cannot express.
+    marginalMinutes: real("marginal_minutes").notNull(),
+    toStayMinutes: real("to_stay_minutes").notNull(),
+    fromStayMinutes: real("from_stay_minutes").notNull(),
+    toStayMiles: real("to_stay_miles").notNull(),
+    arrivalIso: text("arrival_iso"), // Wall-clock arrival, for the sunset filter.
+    sunsetIso: text("sunset_iso"),
+    factors: text("factors").notNull(), // JSON: per-factor 0-1 scores, so sliders re-rank without routing.
+    score: real("score").notNull(), // Weighted sum at build time; recomputed on a slider move.
+    // Null means it survived every filter. Set means it was ruled out, and why —
+    // the UI says which filter rejected it rather than dropping it silently.
+    excludedReason: text("excluded_reason"),
+    orderIndex: integer("order_index").notNull(),
+  },
+  (table) => [index("stay_options_candidate_order").on(table.candidateId, table.orderIndex)],
+);
+
+/** Per-trip slider weights for stay scoring; zero excludes that factor or kind entirely. */
+export const stayWeights = sqliteTable(
+  "stay_weights",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tripId: integer("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    factor: text("factor").notNull(), // kind-campground | kind-dispersed | kind-lodging | kind-parking | needs | cost | signal | legality | sights | freshness
+    weight: real("weight").notNull().default(1),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("stay_weights_trip_factor").on(table.tripId, table.factor)],
+);
+
+/**
+ * "We have a bed tonight." An operator's commitment for one date, which pins
+ * the night regardless of score — either operator can record it.
+ */
+export const stayPlans = sqliteTable(
+  "stay_plans",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tripId: integer("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    planDate: text("plan_date").notNull(),
+    poiId: integer("poi_id")
+      .notNull()
+      .references(() => pois.id, { onDelete: "cascade" }),
+    state: text("state").notNull(), // intended | booked | confirmed | failed
+    costUsd: real("cost_usd"),
+    confirmation: text("confirmation"),
+    notes: text("notes"),
+    recordedBy: integer("recorded_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("stay_plans_trip_date").on(table.tripId, table.planDate)],
+);
 
 /** A remembered geocoder answer, so a place found with an uplink stays findable without one. */
 export const placeLookups = sqliteTable(

@@ -78,9 +78,24 @@ interface OsrmTableResponse {
   distances?: (number | null)[][];
 }
 
-export async function osrmTable(coords: LatLng[]): Promise<OsrmTable> {
+/**
+ * Distance/duration matrix.
+ *
+ * `sources` and `destinations` are indices into `coords`. Passing them turns a
+ * square matrix into the thin strip a caller usually wants — the stay scorer
+ * needs "position → every candidate stay" and "every candidate stay → tomorrow's
+ * first point", which is two strips rather than one N×N table. Omit both for the
+ * full square, which is what needSearch does.
+ */
+export async function osrmTable(
+  coords: LatLng[],
+  opts?: { sources?: number[]; destinations?: number[] },
+): Promise<OsrmTable> {
   if (coords.length < 2) throw new OsrmUnavailableError("need at least two coordinates");
-  const url = `${OSRM_URL}/table/v1/driving/${coordPath(coords)}?annotations=duration,distance`;
+  const params = ["annotations=duration,distance"];
+  if (opts?.sources) params.push(`sources=${opts.sources.join(";")}`);
+  if (opts?.destinations) params.push(`destinations=${opts.destinations.join(";")}`);
+  const url = `${OSRM_URL}/table/v1/driving/${coordPath(coords)}?${params.join("&")}`;
   const data = (await osrmFetch(url)) as OsrmTableResponse;
   if (data.code !== "Ok" || !data.durations || !data.distances) {
     throw new OsrmUnavailableError(`router said ${data.code}`);
