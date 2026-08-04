@@ -17,7 +17,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { cellToBoundary, cellToParent, getResolution } from "h3-js";
+import { cellToBoundary, cellToLatLng, cellToParent, getResolution } from "h3-js";
 import {
   aggregate,
   carrierFor,
@@ -34,6 +34,9 @@ interface Args {
   out: string;
   parentRes: number;
   providers: string | null;
+  /** Where to write the server-side lookup table, when one is wanted. */
+  cellsOut: string | null;
+  asOf: string | null;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -44,7 +47,9 @@ function parseArgs(argv: string[]): Args {
   const input = get("--in");
   const output = get("--out");
   if (input === null || output === null) {
-    throw new Error("usage: build-cell-signal.ts --in <csv dir> --out <geojsonl> [--parent-res 7] [--providers map.json]");
+    throw new Error(
+      "usage: build-cell-signal.ts --in <csv dir> --out <geojsonl> [--parent-res 7] [--providers map.json] [--cells-out cell-signal-cells.json] [--as-of DATE]",
+    );
   }
   return {
     in: input,
@@ -54,6 +59,8 @@ function parseArgs(argv: string[]): Args {
     // whole job is to say "somewhere around here works".
     parentRes: Number(get("--parent-res") ?? 7),
     providers: get("--providers"),
+    cellsOut: get("--cells-out"),
+    asOf: get("--as-of"),
   };
 }
 
@@ -195,6 +202,42 @@ function main(): void {
     );
   }
   out.end();
+
+  // The same hexes again, as a lookup table the server can read.
+  //
+  // The tiles are for looking at; this is for the stay scorer, which needs to
+  // ask "is there signal where we would sleep?" without a map in front of it.
+  // Emitting it here rather than deriving it separately is what guarantees the
+  // answer it gives and the shading you see can never disagree.
+  if (args.cellsOut !== null) {
+    const lookup: Record<string, number> = {};
+    let s = 90;
+    let w = 180;
+    let n = -90;
+    let e = -180;
+    for (const cell of cells) {
+      if (cell.best <= 0) continue; // Absence means no reported coverage; storing it would double the file.
+      lookup[cell.cell] = cell.best;
+      const [lat, lng] = cellToLatLng(cell.cell);
+      if (lat < s) s = lat;
+      if (lat > n) n = lat;
+      if (lng < w) w = lng;
+      if (lng > e) e = lng;
+    }
+    fs.writeFileSync(
+      args.cellsOut,
+      JSON.stringify({
+        resolution: args.parentRes,
+        asOf: args.asOf,
+        // Padded by roughly one hex, so a point just inside the outermost cell
+        // is not reported as outside the built extent.
+        bbox: [s - 0.1, w - 0.1, n + 0.1, e + 0.1],
+        cells: lookup,
+      }),
+      "utf8",
+    );
+    console.log(`server lookup written: ${args.cellsOut} (${String(Object.keys(lookup).length)} covered hexes)`);
+  }
 
   console.log(`rows read: ${String(stats.rows)}, skipped: ${String(stats.skipped)}, hexes written: ${String(cells.length)}`);
   if (unmatched.size > 0) {

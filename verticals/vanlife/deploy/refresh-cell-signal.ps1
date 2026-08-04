@@ -165,8 +165,13 @@ done
   Write-Host "== Aggregating hexes =="
   $providersArg = if (Test-Path $ProvidersFile) { @("--providers", $ProvidersFile) } else { @() }
   $geojson = Join-Path $WorkDir "coverage.geojsonl"
+  # --cells-out writes the same hexes a second time as a lookup table for the
+  # server. Without it the coverage overlay is write-only to the map, and the
+  # stay scorer cannot tell whether the spot it picked has any signal to work
+  # from in the morning.
+  $cellsOut = Join-Path $WorkDir "cell-signal-cells.json"
   & pnpm exec tsx (Join-Path $PSScriptRoot "build-cell-signal.ts") `
-    --in $csv --out $geojson --parent-res $ParentRes @providersArg
+    --in $csv --out $geojson --parent-res $ParentRes --cells-out $cellsOut --as-of $asOf @providersArg
   if ($LASTEXITCODE -ne 0) { throw "build-cell-signal.ts failed." }
 
   Write-Host "== Tiling =="
@@ -182,7 +187,7 @@ done
   # right now, so it must never see a half-written one.
   Write-Host "== Installing =="
   docker run --rm -v "${Volume}:/tiles" -v "${WorkDir}:/work:ro" alpine sh -c `
-    "cp /work/$ArchiveName /tiles/$ArchiveName.tmp && mv /tiles/$ArchiveName.tmp /tiles/$ArchiveName"
+    "cp /work/$ArchiveName /tiles/$ArchiveName.tmp && mv /tiles/$ArchiveName.tmp /tiles/$ArchiveName && cp /work/cell-signal-cells.json /tiles/cell-signal-cells.json.tmp && mv /tiles/cell-signal-cells.json.tmp /tiles/cell-signal-cells.json"
   if ($LASTEXITCODE -ne 0) { throw "installing the archive onto $Volume failed." }
 
   $now = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")

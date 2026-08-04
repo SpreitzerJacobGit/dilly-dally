@@ -6,6 +6,7 @@
  *  - checkins: Check-ins (#checkins)
  *  - poi: POI aggregation (#poi)
  *  - routes: Route candidates (#routes)
+ *  - stays: Where we stay the night (#stays)
  *  - map-dashboard: Map dashboard (#map)
  *  - interests: Interest profile (#interests)
  *  - digest: Daily digest (#digest)
@@ -20,6 +21,7 @@ import {
   planRouter,
   poisRouter,
   sourcesRouter,
+  staysRouter,
   tripsRouter,
 } from "./routers.js";
 import { seedVanlifeData } from "./seed.js";
@@ -35,6 +37,7 @@ export const bespokeRouters = {
   interests: interestsRouter,
   digest: digestRouter,
   sources: sourcesRouter,
+  stays: staysRouter,
 };
 
 export const bespokeSeeds: SeedFn[] = [seedVanlifeData];

@@ -3,7 +3,7 @@ import { and, eq, type Db, type DbHandle } from "@elements/storage-sqlite-drizzl
 import { getSetting } from "@elements/lifecycle-app-settings";
 import { createNtfyPublisher, type PublishResult } from "@elements/output-ntfy-push";
 import type { AppLogger } from "@elements/observability-structured-logging";
-import { digests, routeCandidates } from "../../db/schema.js";
+import { digests, pois, routeCandidates, stayPlans } from "../../db/schema.js";
 import { formatRunway } from "../../shared/levels.js";
 import { loadNeedStates } from "./needs.js";
 import { budgetUsage, planDateOf, type CandidateWarning, type TripRow } from "./candidates.js";
@@ -79,6 +79,20 @@ export async function composeDigest(
     for (const w of c.warnings) {
       if (w.severity === "urgent") important.push(`${c.title}: ${w.message}`);
     }
+  }
+  // Tonight's bed, when one of us has actually phoned ahead. A booking is a
+  // promise to be somewhere by this evening, which belongs in the important cut
+  // next to a need about to run out — and it is the one thing on this screen the
+  // planner must not quietly re-rank past.
+  const booked = (
+    await db
+      .select({ name: pois.name, state: stayPlans.state })
+      .from(stayPlans)
+      .innerJoin(pois, eq(pois.id, stayPlans.poiId))
+      .where(and(eq(stayPlans.tripId, trip.id), eq(stayPlans.planDate, date)))
+  )[0];
+  if (booked && (booked.state === "booked" || booked.state === "confirmed")) {
+    important.push(`Tonight is ${booked.state} at ${booked.name}.`);
   }
 
   // Progress = how much of the direct driving is behind us, by budget math.

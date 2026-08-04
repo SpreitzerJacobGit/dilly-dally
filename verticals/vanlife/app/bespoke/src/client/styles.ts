@@ -39,6 +39,19 @@ export const VL_STYLES = `
 .vl-stops li { margin: 2px 0; }
 .vl-stops .vl-visited { text-decoration: line-through; color: #888; }
 
+.vl-tonight { border: 1px solid #e2e2e2; border-radius: 8px; padding: 10px 12px;
+  margin-bottom: 10px; background: #fff; }
+.vl-tonight .vl-summary { color: #555; font-size: .85rem; }
+.vl-stay-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: .85rem; }
+.vl-stay-row { border-top: 1px solid #f0f0f0; padding: 6px 0; }
+.vl-stay-row:first-child { border-top: none; }
+.vl-stay-badge { margin-left: 6px; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em;
+  background: #16a34a; color: #fff; border-radius: 10px; padding: 1px 7px; }
+.vl-stay-weights { margin-top: 6px; display: grid; gap: 4px; }
+.vl-stay-weight { display: grid; grid-template-columns: 1fr 120px 34px; align-items: center;
+  gap: 8px; font-size: .85rem; }
+@media (max-width: 480px) { .vl-stay-weight { grid-template-columns: 1fr 90px 30px; } }
+
 .vl-checkin-bar { position: sticky; bottom: 0; background: #fffffff2; border-top: 1px solid #ddd;
   display: flex; gap: 8px; padding: 10px 12px; z-index: 6; align-items: center; flex-wrap: wrap; }
 @media (min-width: 900px) { .vl-checkin-bar { position: static; border: 1px solid #e2e2e2; border-radius: 8px; margin-top: 12px; } }

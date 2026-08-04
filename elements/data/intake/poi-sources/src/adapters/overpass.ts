@@ -24,7 +24,28 @@ const CATEGORY_RULES: { category: string; fallbackName: string; match: (t: Recor
   { category: "water-fill", fallbackName: "Drinking water", match: (t) => t.amenity === "drinking_water" || t.man_made === "water_point" },
   { category: "laundry", fallbackName: "Laundromat", match: (t) => t.shop === "laundry" },
   { category: "grocery", fallbackName: "Grocery store", match: (t) => t.shop === "supermarket" || t.shop === "convenience" },
+  // Dispersed must be tested before campground: an undeveloped backcountry site
+  // is tagged tourism=camp_site too, and the first rule to match wins.
+  {
+    category: "dispersed",
+    fallbackName: "Dispersed campsite",
+    match: (t) =>
+      t.tourism === "camp_site" &&
+      (t.backcountry === "yes" || t.camp_site === "basic" || t.informal === "yes"),
+  },
   { category: "campground", fallbackName: "Campground", match: (t) => t.tourism === "camp_site" },
+  { category: "lodging", fallbackName: "Hotel", match: (t) => t.tourism === "hotel" || t.tourism === "motel" },
+  // Overnight parking is the one stay kind where recall must lose to precision.
+  // Most amenity=parking is day-use, and a lot that turns out to be posted costs
+  // a knock on the window at 2am — so nothing qualifies without a tag that
+  // explicitly permits staying the night.
+  {
+    category: "parking",
+    fallbackName: "Overnight parking",
+    match: (t) =>
+      (t.amenity === "parking" || t.highway === "rest_area") &&
+      (t.overnight === "yes" || t.motorhome === "yes" || t.caravan === "yes"),
+  },
   { category: "restroom", fallbackName: "Public restroom", match: (t) => t.amenity === "toilets" },
   { category: "scenic", fallbackName: "Viewpoint", match: (t) => t.tourism === "viewpoint" },
   { category: "ev-charge", fallbackName: "Charging station", match: (t) => t.amenity === "charging_station" },
@@ -38,8 +59,15 @@ function buildQuery(bbox: [number, number, number, number]): string {
     `node["man_made"="water_point"](${bb});`,
     `node["shop"~"^(laundry|supermarket|convenience)$"](${bb});`,
     `way["shop"="supermarket"](${bb});`,
-    `node["tourism"~"^(camp_site|viewpoint)$"](${bb});`,
-    `way["tourism"="camp_site"](${bb});`,
+    `node["tourism"~"^(camp_site|viewpoint|hotel|motel)$"](${bb});`,
+    `way["tourism"~"^(camp_site|hotel|motel)$"](${bb});`,
+    // Only lots that say overnight is allowed — see the parking rule above.
+    `node["amenity"="parking"]["overnight"="yes"](${bb});`,
+    `way["amenity"="parking"]["overnight"="yes"](${bb});`,
+    `node["amenity"="parking"]["motorhome"="yes"](${bb});`,
+    `way["amenity"="parking"]["motorhome"="yes"](${bb});`,
+    `node["highway"="rest_area"]["overnight"="yes"](${bb});`,
+    `way["highway"="rest_area"]["overnight"="yes"](${bb});`,
   ];
   return `[out:json][timeout:90];(${selectors.join("")});out center 4000;`;
 }

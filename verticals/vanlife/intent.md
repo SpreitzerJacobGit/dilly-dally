@@ -100,7 +100,24 @@ Each day the application proposes candidate routes across a spectrum of ambition
 `[ROUTE-8]` Candidates prefer stops that share a trip: a place worth stopping for that sits beside a planned service stop is chosen over an equally good one far from it, and where two places servicing the same need cost nearly the same detour, the one nearest the day's best sights wins — never at the cost of dropping a service stop a need requires, exceeding the deviation budget, or changing the plan when nothing else changed.
 `[ROUTE-9]` How many hours the day is planned around can be set for today alone from the Today tab: it takes effect on the next replan, it leaves the trip's own pace and every Target's expected arrival untouched, and the following day reverts to the trip's pace on its own. The pace a new trip starts at is an application setting.
 
-## 9. The planning screen
+## 9. Where we stay the night
+
+A day-leg ends where the night is spent, not at a point on the road. Four kinds of stay compete for it — a campground, a dispersed site, a hotel, or an overnight parking lot — ranked against the needs that are actually running down, with the reasons anything was ruled out kept in view.
+
+`[STAY-1]` Every candidate ends the day at a named place to stay, and when none can be found it says so and describes the endpoint as the reach of the day's drive rather than naming it as a place.
+`[STAY-2]` Campgrounds, dispersed sites, hotels and overnight parking are all offered for the same night, each showing its kind, what it costs, how many minutes it adds to the day, and what time we would arrive.
+`[STAY-3]` The stays a candidate did not pick stay visible and ranked, so a place that turns out to be full has alternatives already on screen rather than needing a replan to find them.
+`[STAY-4]` A stay is ruled out only for a stated reason — the road in needs high clearance, it adds more than the detour cap, we would arrive after dark somewhere unlit, or a source reported it full or closed — and how many were ruled out and why is shown rather than the list quietly being shorter.
+`[STAY-5]` What a night costs is shown wherever a stay is shown, and never rules a stay out by itself.
+`[STAY-6]` Per-trip weights re-rank the night's list as soon as they change, without recomputing any route; a weight of zero removes that kind of stay entirely, and when the new ranking favours somewhere other than where the route drives, the candidate says so and offers to re-route.
+`[STAY-7]` A stay that services a need close to running out outranks an equally convenient one that services nothing.
+`[STAY-8]` The minutes a stay adds are measured against carrying on toward tomorrow, not as a there-and-back detour, so a place further along the route costs close to nothing.
+`[STAY-9]` Availability is refreshed in the background and never while planning; it is always shown with when it was checked, and an answer that has not changed does not reshuffle the day's candidates.
+`[STAY-10]` A failed availability check is reported against the last known answer rather than replacing it — the application never forgets what it knew because it could not reach a source.
+`[STAY-11]` Either operator can record that tonight is booked, and a booked stay is the plan regardless of how it scores until it is cleared.
+`[STAY-12]` Whether a stay is on land where camping is permitted, has cell signal, or sits on a road anyone has verified is stated where it is known and admitted where it is not; with the optional overlays absent those factors say nothing rather than defaulting to an answer.
+
+## 10. The planning screen
 One screen: the map as the primary surface, with the Origin and Targets list, today's candidates, and the trip's numbers beside it.
 
 `[MAP-1]` Today's candidates render on the map in role-coded colors with a legend, each with its projected continuation to the final Target drawn in gray behind it, so zooming out shows the alternative futures spread and reconverge on the destination.
@@ -110,7 +127,7 @@ One screen: the map as the primary surface, with the Origin and Targets list, to
 `[MAP-5]` The Origin and every Target are visible on the map — areas as shaded regions, exact points as numbered pins with the final one marked — and selecting one in the list or on the map selects it in both and brings it into view.
 `[MAP-6]` Targets are created, moved, resized, reordered, narrowed, and deleted from the planning screen itself; no separate screen is needed to shape the route.
 
-## 10. Legal camping overlay
+## 11. Legal camping overlay
 Where dispersed camping is permitted, shown as two separate land layers — BLM ownership and USFS road corridors — because they are different legal regimes and a single merged "legal" answer could not be audited. The overlay is optional data, prepared out of band; an installation without it behaves normally and says so.
 
 `[LEGAL-1]` The map can shade BLM open land and USFS forest-road camping corridors as two distinct layers, each switched on and off independently from the legend, with the choice remembered across reloads.
@@ -121,13 +138,13 @@ Where dispersed camping is permitted, shown as two separate land layers — BLM 
 `[LEGAL-6]` The status screen reports when the overlay was built, how many forests have a published camping distance, and the assumed distance used everywhere else.
 `[LEGAL-7]` A failure to load the overlay is reported as an overlay problem and never as a basemap problem, so a broken optional layer cannot be mistaken for a broken map.
 
-## 11. Interest profile
+## 12. Interest profile
 Side-quest suggestions are biased by configurable interest weights blended with popularity.
 
 `[PROF-1]` Category interest weights are editable and arrive seeded with defaults; changing a weight re-ranks side-quest suggestions the next time candidates are generated.
 `[PROF-2]` A category whose weight is set to zero produces no side-quest suggestions, no matter how popular its places are; among the rest, a heavily weighted category outranks a lightly weighted one of similar popularity.
 
-## 12. Daily digest
+## 13. Daily digest
 One digest each morning: progress, today's options, and what needs attention — with an important-only cut that is honest when nothing is important.
 
 `[DIG-1]` Each morning at the configured hour the application publishes exactly one digest for the day — never more than one, even across restarts — summarizing trip progress, today's candidates, and need deadlines within the next two days.
@@ -135,7 +152,7 @@ One digest each morning: progress, today's options, and what needs attention —
 `[DIG-3]` The morning digest is always readable on the planning screen as a dismissible banner, and dismissing it on one device does not dismiss it for the other operator.
 `[DIG-4]` Push delivery reports itself honestly: an unconfigured push channel shows "Not configured" while the in-app digest keeps working, and a failed delivery is visible with its error — the application never claims a digest was pushed that was not.
 
-## 13. Offline & remote
+## 14. Offline & remote
 The van server is the source of truth; the internet is optional.
 
 `[OFF-1]` With no internet connection, the planning screen still shows the current plan, need levels, and map, and plans can still be regenerated — only place refreshing and push delivery degrade, each reporting its state honestly.

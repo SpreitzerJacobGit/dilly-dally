@@ -7,6 +7,7 @@ import { type CandidateDetail } from "../components/CandidateList.js";
 import { NeedsStrip, type NeedStateView } from "../components/NeedsStrip.js";
 import { NeedSearchSheet } from "../components/NeedSearchSheet.js";
 import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
+import { TonightPanel } from "../components/TonightPanel.js";
 import { SetPositionModal } from "../planner/SetPositionModal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import type { DigestView } from "../components/DigestBanner.js";
@@ -375,6 +376,9 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
       distanceMiles: c.distanceMiles,
       remainingBudgetMinutes: c.remainingBudgetMinutes,
       selected: c.selected,
+      stayOptions: c.stayOptions,
+      plannedStayPoiId: c.plannedStayPoiId,
+      stayWinnerChanged: c.stayWinnerChanged,
       stops: c.stops.map((s) => ({
         orderIndex: s.orderIndex,
         name: s.toName,
@@ -925,6 +929,21 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
               onClearPin={(id) => pinMut.mutate({ id, point: null, poiId: null })}
               onNarrowToPlace={(parentId, poiId) => promoteMut.mutate({ parentId, poiId })}
               onPinPlace={(id, p) => pinMut.mutate({ id, point: { lat: p.lat, lng: p.lng }, poiId: p.id })}
+            />
+          ) : null}
+
+          {tab === "today" && planQ.data ? (
+            <TonightPanel
+              tripId={tripId}
+              planDate={planQ.data.date}
+              candidateId={highlightedId}
+              options={candidates.find((c) => c.id === highlightedId)?.stayOptions ?? []}
+              plannedStayPoiId={candidates.find((c) => c.id === highlightedId)?.plannedStayPoiId ?? null}
+              stayWinnerChanged={candidates.find((c) => c.id === highlightedId)?.stayWinnerChanged ?? false}
+              onReplan={() => replan.mutate({ tripId })}
+              // A slider move re-ranks what is already stored, so refreshing the
+              // day's read is enough — no router call, no rebuild.
+              onChanged={() => void utils.plan.today.invalidate()}
             />
           ) : null}
 

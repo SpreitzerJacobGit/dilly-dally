@@ -22,9 +22,27 @@ import {
   progressEvents,
   routeCandidates,
   routeLegs,
+  stayAvailability,
+  stayOptions,
+  stayPlans,
+  staySites,
+  stayWeights,
   trips,
   waypoints,
 } from "../db/schema.js";
+import {
+  DEFAULT_STAY_WEIGHTS,
+  STAY_KINDS,
+  STAY_SETTINGS_KEY,
+  STAY_WEIGHT_KEYS,
+  StaySettingsSchema,
+  loadStayWeights,
+  rankStays,
+  staySettings,
+  type StayKind,
+} from "./engine/stays.js";
+import { availabilityHealth } from "./engine/stayAvailability.js";
+import { hexArtifactStatuses } from "./engine/hexLookup.js";
 import {
   targetAddSchema,
   targetPinSchema,
@@ -583,12 +601,107 @@ async function candidatesWithLegs(db: Parameters<typeof loadNeedStates>[0], trip
     .select()
     .from(daySelections)
     .where(and(eq(daySelections.tripId, tripId), eq(daySelections.planDate, date)));
-  return rows.map((c) => ({
-    ...c,
-    warnings: JSON.parse(c.warnings ?? "[]") as CandidateWarning[],
-    stops: legs.filter((l) => l.candidateId === c.id),
-    selected: selection[0]?.candidateId === c.id,
-  }));
+
+  // Tonight's shortlist, re-ranked under the CURRENT weights rather than the
+  // ones the build used. This is what makes the sliders instant: the routed
+  // costs and per-factor scores were computed once when the plan was built, so
+  // re-ranking is arithmetic and needs no router. When the re-rank moves a
+  // different bed to the top, the candidate says so instead of quietly drawing
+  // a route to somewhere it no longer recommends.
+  const weights = await loadStayWeights(db, tripId);
+  const optionRows =
+    ids.length === 0
+      ? []
+      : await db
+          .select({
+            opt: stayOptions,
+            name: pois.name,
+            source: pois.source,
+            url: pois.url,
+            lat: pois.lat,
+            lng: pois.lng,
+            site: staySites,
+          })
+          .from(stayOptions)
+          .innerJoin(pois, eq(pois.id, stayOptions.poiId))
+          .leftJoin(staySites, eq(staySites.poiId, stayOptions.poiId))
+          .where(inArray(stayOptions.candidateId, ids))
+          .orderBy(asc(stayOptions.orderIndex));
+  const availRows =
+    optionRows.length === 0
+      ? []
+      : await db
+          .select()
+          .from(stayAvailability)
+          .where(
+            and(
+              inArray(stayAvailability.poiId, [...new Set(optionRows.map((r) => r.opt.poiId))]),
+              eq(stayAvailability.forDate, date),
+            ),
+          );
+  const availByPoi = new Map(availRows.map((a) => [a.poiId, a]));
+  const bookedRow = (
+    await db
+      .select()
+      .from(stayPlans)
+      .where(and(eq(stayPlans.tripId, tripId), eq(stayPlans.planDate, date)))
+  )[0];
+  const bookedPoiId =
+    bookedRow && (bookedRow.state === "booked" || bookedRow.state === "confirmed") ? bookedRow.poiId : null;
+
+  return rows.map((c) => {
+    const mine = optionRows
+      .filter((r) => r.opt.candidateId === c.id)
+      .map((r) => {
+        const a = availByPoi.get(r.opt.poiId);
+        return {
+          poiId: r.opt.poiId,
+          name: r.name,
+          source: r.source,
+          url: r.url,
+          lat: r.lat,
+          lng: r.lng,
+          stayKind: r.opt.stayKind as StayKind,
+          marginalMinutes: r.opt.marginalMinutes,
+          toStayMinutes: r.opt.toStayMinutes,
+          toStayMiles: r.opt.toStayMiles,
+          arrivalIso: r.opt.arrivalIso,
+          sunsetIso: r.opt.sunsetIso,
+          nightlyCostUsd: r.site?.nightlyCostUsd ?? null,
+          hookupElectric: r.site?.hookupElectric ?? false,
+          dumpStation: r.site?.dumpStation ?? false,
+          laundryOnSite: r.site?.laundryOnSite ?? false,
+          showers: r.site?.showers ?? false,
+          access: r.site?.access ?? "unknown",
+          confidence: r.site?.confidence ?? "unverified",
+          reservable: r.site?.reservable ?? "unknown",
+          // Always with its age — an answer from three days ago is not a claim
+          // about tonight, and offline it is all we will ever have.
+          availability: a
+            ? { state: a.state, source: a.source, detail: a.detail, fetchedAt: a.fetchedAt, lastError: a.lastError }
+            : null,
+          factors: JSON.parse(r.opt.factors) as Record<string, number>,
+          excludedReason: r.opt.excludedReason,
+          booked: bookedPoiId === r.opt.poiId,
+        };
+      });
+    const ranked = rankStays(mine, weights);
+    const stops = legs.filter((l) => l.candidateId === c.id);
+    const lastStop = stops[stops.length - 1];
+    const plannedStayPoiId =
+      lastStop && ["camp", "lodging", "park"].includes(lastStop.purpose) ? lastStop.poiId : null;
+    const topPoiId = ranked.find((s) => s.excludedReason === null)?.poiId ?? null;
+    return {
+      ...c,
+      warnings: JSON.parse(c.warnings ?? "[]") as CandidateWarning[],
+      stops,
+      selected: selection[0]?.candidateId === c.id,
+      stayOptions: ranked,
+      plannedStayPoiId,
+      /** The weights now favour a different bed than the one this route drives to. */
+      stayWinnerChanged: topPoiId !== null && plannedStayPoiId !== null && topPoiId !== plannedStayPoiId,
+    };
+  });
 }
 
 export const planRouter = router({
@@ -1144,4 +1257,169 @@ export const digestRouter = router({
 export const sourcesRouter = router({
   poiSources: createPoiSourcesStatusRouter({ sources: ["overpass", "nps", "recgov", "opencharge"] }),
   ntfy: createNtfyStatusRouter(),
+});
+
+/**
+ * Where we sleep: the weights that rank tonight's shortlist, the one hard cap
+ * that is a limit rather than a preference, and the operators' own commitment
+ * when one of them has actually phoned ahead.
+ */
+export const staysRouter = router({
+  weights: op.input(z.object({ tripId: z.number().int() })).query(async ({ ctx, input }) => {
+    const db = ctx.dbHandle.db;
+    await tripOr404(db, input.tripId);
+    const current = await loadStayWeights(db, input.tripId);
+    return {
+      kinds: STAY_KINDS,
+      weights: STAY_WEIGHT_KEYS.map((factor) => ({
+        factor,
+        weight: current.get(factor) ?? DEFAULT_STAY_WEIGHTS[factor] ?? 1,
+        default: DEFAULT_STAY_WEIGHTS[factor] ?? 1,
+      })),
+      maxDetourMinutes: (await staySettings(db)).maxDetourMinutes,
+    };
+  }),
+
+  /**
+   * Moving a slider does not replan. The stored options carry their routed
+   * costs and factor scores, so the next read re-ranks them instantly; only
+   * when the winner changes does the day need re-routing, and the candidate
+   * says so rather than the app spending router calls on every drag.
+   */
+  setWeights: op
+    .input(
+      z.object({
+        tripId: z.number().int(),
+        weights: z
+          .array(z.object({ factor: z.enum(STAY_WEIGHT_KEYS as [string, ...string[]]), weight: z.number().min(0).max(3) }))
+          .min(1),
+      }),
+    )
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        await tripOr404(db, input.tripId);
+        const now = nowIso();
+        for (const w of input.weights) {
+          const existing = (
+            await db
+              .select()
+              .from(stayWeights)
+              .where(and(eq(stayWeights.tripId, input.tripId), eq(stayWeights.factor, w.factor)))
+          )[0];
+          if (existing) {
+            if (existing.weight === w.weight) continue;
+            await db
+              .update(stayWeights)
+              .set({ weight: w.weight, updatedAt: now })
+              .where(eq(stayWeights.id, existing.id));
+          } else {
+            await db
+              .insert(stayWeights)
+              .values({ tripId: input.tripId, factor: w.factor, weight: w.weight, updatedAt: now });
+          }
+        }
+        void ctx;
+        return { ok: true };
+      }),
+    ),
+
+  setDetourCap: op
+    .input(z.object({ maxDetourMinutes: z.number().min(0).max(240) }))
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        await setSetting(
+          db,
+          STAY_SETTINGS_KEY,
+          StaySettingsSchema,
+          { maxDetourMinutes: input.maxDetourMinutes },
+          String(ctx.user.id),
+        );
+        return { maxDetourMinutes: input.maxDetourMinutes };
+      }),
+    ),
+
+  /**
+   * "We phoned ahead." Either operator can record it, and it pins the night
+   * regardless of score — the app has no business re-ranking past a call it did
+   * not make.
+   */
+  book: op
+    .input(
+      z.object({
+        tripId: z.number().int(),
+        planDate: z.string().min(10).max(10),
+        poiId: z.number().int(),
+        state: z.enum(["intended", "booked", "confirmed", "failed"]),
+        costUsd: z.number().min(0).nullable().optional(),
+        confirmation: z.string().max(200).nullable().optional(),
+        notes: z.string().max(500).nullable().optional(),
+      }),
+    )
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        await tripOr404(db, input.tripId);
+        const place = (await db.select().from(pois).where(eq(pois.id, input.poiId)))[0];
+        if (!place) rejectIntake("Place not found");
+        const now = nowIso();
+        const existing = (
+          await db
+            .select()
+            .from(stayPlans)
+            .where(and(eq(stayPlans.tripId, input.tripId), eq(stayPlans.planDate, input.planDate)))
+        )[0];
+        const values = {
+          state: input.state,
+          poiId: input.poiId,
+          costUsd: input.costUsd ?? null,
+          confirmation: input.confirmation ?? null,
+          notes: input.notes ?? null,
+          recordedBy: ctx.user.id,
+          updatedAt: now,
+        };
+        if (existing) {
+          await db.update(stayPlans).set(values).where(eq(stayPlans.id, existing.id));
+        } else {
+          await db
+            .insert(stayPlans)
+            .values({ tripId: input.tripId, planDate: input.planDate, createdAt: now, ...values });
+        }
+        return { ok: true, poiId: input.poiId, state: input.state };
+      }),
+    ),
+
+  clearBooking: op
+    .input(z.object({ tripId: z.number().int(), planDate: z.string().min(10).max(10) }))
+    .mutation(
+      intakeWrite(async ({ db, input }) => {
+        await db
+          .delete(stayPlans)
+          .where(and(eq(stayPlans.tripId, input.tripId), eq(stayPlans.planDate, input.planDate)));
+        return { ok: true };
+      }),
+    ),
+
+  booking: op
+    .input(z.object({ tripId: z.number().int(), planDate: z.string().min(10).max(10) }))
+    .query(async ({ ctx, input }) => {
+      const db = ctx.dbHandle.db;
+      const row = (
+        await db
+          .select({ plan: stayPlans, name: pois.name })
+          .from(stayPlans)
+          .innerJoin(pois, eq(pois.id, stayPlans.poiId))
+          .where(and(eq(stayPlans.tripId, input.tripId), eq(stayPlans.planDate, input.planDate)))
+      )[0];
+      return row ? { ...row.plan, name: row.name } : null;
+    }),
+
+  /** Availability is live data in an offline-first app; it reports its own state. */
+  availabilityHealth: op.query(async ({ ctx }) => availabilityHealth(ctx.dbHandle.db)),
+
+  /**
+   * The two optional lookup artifacts the stay scorer reads. Reported because
+   * their absence silently changes how stays are scored — legality and signal
+   * fall back to saying nothing — and an installation should be able to see
+   * that rather than wonder why dispersed sites never win.
+   */
+  overlayLookups: op.query(() => hexArtifactStatuses()),
 });

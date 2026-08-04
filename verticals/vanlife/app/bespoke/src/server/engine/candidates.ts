@@ -13,6 +13,11 @@ import {
   progressEvents,
   routeCandidates,
   routeLegs,
+  stayAvailability,
+  stayOptions,
+  stayPlans,
+  staySites,
+  stayWeights,
   trips,
   waypoints,
 } from "../../db/schema.js";
@@ -34,7 +39,6 @@ import {
 import {
   anchorPoiPools,
   corridorPois,
-  nearestOfCategory,
   sightAffinity,
   type CorridorPoi,
   type CorridorPois,
@@ -53,6 +57,17 @@ import {
   CLUSTER_TIE_MINUTES,
   STICKY_BONUS,
 } from "./scoring.js";
+import {
+  DEFAULT_MAX_STAY_DETOUR_MINUTES,
+  PURPOSE_BY_STAY_KIND,
+  chosenStay,
+  evaluateStays,
+  loadStayCandidates,
+  loadStayWeights,
+  noStayExplanation,
+  staySettings,
+  type EvaluatedStay,
+} from "./stays.js";
 
 /**
  * The tour engine: 3–5 day-leg candidates per day, from most-direct to
@@ -101,6 +116,12 @@ export interface BuiltCandidate {
   projectedGeometry: string | null;
   warnings: CandidateWarning[];
   stops: (StopDraft & { etaMinutesFromStart: number; cumMiles: number })[];
+  /**
+   * Every stay this candidate weighed, winner and runners-up and ruled-out
+   * alike. Persisted so a weight slider re-ranks them without routing, and so a
+   * site that turns out to be full has its alternatives already to hand.
+   */
+  stayOptions: EvaluatedStay[];
 }
 
 const ROLES: { tier: string; detourFraction: number; label: string }[] = [
@@ -119,7 +140,11 @@ const DWELL_BY_PURPOSE: Record<string, number> = {
   resupply: 45,
   charge: 45,
   sight: 60,
+  // The night's stay ends the leg, so its dwell is the night itself — not a
+  // duration the day's drive budget has to carry.
   camp: 0,
+  lodging: 0,
+  park: 0,
   family: 120,
   drive: 0,
 };
@@ -132,6 +157,9 @@ const PURPOSE_BY_CATEGORY: Record<string, string> = {
   grocery: "resupply",
   "ev-charge": "charge",
   campground: "camp",
+  dispersed: "camp",
+  lodging: "lodging",
+  parking: "park",
   family: "family",
   hike: "sight",
   boulder: "sight",
@@ -295,6 +323,10 @@ interface BuildContext {
   /** Per service place, how much sightseeing sits within CLUSTER_RADIUS_MILES. */
   clusterAffinity: Map<number, number>;
   remainingBudgetMinutes: number;
+  /** The date the night belongs to — what availability and bookings are keyed on. */
+  planDate: string;
+  stayWeights: Map<string, number>;
+  maxStayDetourMinutes: number;
 }
 
 async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<BuildContext> {
@@ -302,6 +334,9 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
   const baseline = await ensureBaseline(db, trip);
   const usage = await budgetUsage(db, { ...trip, directDurationMinutes: baseline });
   const needStates = await loadNeedStates(db, trip.id, nowIso);
+
+  const stayWeightMap = await loadStayWeights(db, trip.id);
+  const { maxDetourMinutes } = await staySettings(db);
 
   const serviceCategories = [
     ...new Set([
@@ -389,6 +424,9 @@ async function loadContext(db: Db, trip: TripRow, nowIso: string): Promise<Build
     droppedChainPoints: capped.dropped,
     clusterAffinity,
     remainingBudgetMinutes: usage.remainingMinutes ?? 0,
+    planDate: planDateOf(nowIso),
+    stayWeights: stayWeightMap,
+    maxStayDetourMinutes: maxDetourMinutes,
   };
 }
 
@@ -433,12 +471,17 @@ async function buildRole(
   const warnings: CandidateWarning[] = [];
   const arrivesToday = skeleton.durationMinutes <= progressMinutes;
 
-  // Endpoint: arrival at the target, or a sleep spot near the day's reach.
+  // How far the day reaches with nothing chosen yet. This is a comparison
+  // baseline, not a place: where we actually sleep is decided further down,
+  // AFTER the day's stops are placed, because those stops move where the day
+  // ends — sometimes by an hour. Picking the bed against a shape we had not
+  // built yet was the old order, and it was backwards.
   const firstAnchor = ctx.chainAnchors[0] ?? null;
   const firstResolved = ctx.resolved[0] ?? null;
-  let end: StopDraft;
+  let arrival: StopDraft | null = null;
+  let idealEnd: LatLng;
   if (arrivesToday) {
-    end = {
+    arrival = {
       // Say which concrete place an area resolved to, and admit when nothing
       // was known inside it — a bare region name would hide both.
       name:
@@ -456,6 +499,7 @@ async function buildRole(
       dwellMinutes: 0,
       score: 0,
     };
+    idealEnd = { lat: ctx.steer.lat, lng: ctx.steer.lng };
     if (firstResolved?.via === "geometric" && (firstAnchor?.radiusMiles ?? 0) > 0) {
       warnings.push({
         severity: "info",
@@ -463,34 +507,9 @@ async function buildRole(
       });
     }
   } else {
-    const raw = pointAlongLine(skeleton.geometry, progressMinutes / skeleton.durationMinutes);
-    const camp = nearestOfCategory(ctx.pool.byCategory.get("campground") ?? [], raw, 15);
-    end = camp
-      ? {
-          name: camp.name,
-          lat: camp.lat,
-          lng: camp.lng,
-          poiId: camp.id,
-          waypointId: null,
-          needId: null,
-          purpose: "camp",
-          dwellMinutes: 0,
-          score: camp.score,
-        }
-      : {
-          name: "End of day's drive",
-          lat: raw.lat,
-          lng: raw.lng,
-          poiId: null,
-          waypointId: null,
-          needId: null,
-          purpose: "drive",
-          dwellMinutes: 0,
-          score: 0,
-        };
-    if (!camp) warnings.push({ severity: "info", message: "No campground found near the day's end point." });
+    idealEnd = pointAlongLine(skeleton.geometry, progressMinutes / skeleton.durationMinutes);
   }
-  const endPoint = { lat: end.lat, lng: end.lng };
+  const endPoint = idealEnd;
 
   const stops: StopDraft[] = [];
 
@@ -571,15 +590,19 @@ async function buildRole(
   // Route-through-needs, direction 2: the stops we are already committed to
   // making. A sight beside one of them is the same errand — including beside
   // tonight's campground, since that is where the evening is spent anyway.
+  // Where the evening is spent is still an anchor for this, but tonight's stay
+  // is not chosen yet — so the day's reach stands in for it. That is the same
+  // neighbourhood the stay will be picked from, and unlike the stay itself it is
+  // known before the greedy fill runs.
   const clusterAnchors: LatLng[] = [
     ...stops.filter((s) => s.needId !== null).map((s) => ({ lat: s.lat, lng: s.lng })),
-    ...(end.poiId !== null && end.purpose === "camp" ? [endPoint] : []),
+    idealEnd,
   ];
 
   // Side-quest greedy fill, by value density inside the role's detour budget.
   let detourBudget = role.detourFraction * dayMinutes;
   const used = new Set(stops.map((s) => s.poiId).filter((id): id is number => id !== null));
-  if (end.poiId !== null) used.add(end.poiId);
+  if (arrival?.poiId != null) used.add(arrival.poiId);
   const pinnedFirst = [
     ...ctx.pool.pinned.filter((p) => !used.has(p.id)),
     ...ctx.pool.sideQuests.filter((p) => !p.pinned && !used.has(p.id)),
@@ -646,8 +669,101 @@ async function buildRole(
     route = await osrmRoute(coords, { overview: "full" });
   }
 
-  // Continuation to the anchor through the remaining chain.
-  const continuation = await osrmRoute([endPoint, ...ctx.chain], { overview: "simplified" });
+  // ---- The night ------------------------------------------------------------
+  // Now that the day has a shape, choose where it ends. The cost of a stay is
+  // measured against carrying on to `idealEnd` and resuming toward the chain
+  // tomorrow — not as an out-and-back detour, because tomorrow starts from
+  // wherever we slept. A stay further along the route can therefore cost less
+  // than nothing.
+  const nextPoint = ctx.chain[0] ?? idealEnd;
+  const lastStop = stops[stops.length - 1];
+  const lastPoint: LatLng = arrivesToday
+    ? idealEnd
+    : lastStop
+      ? { lat: lastStop.lat, lng: lastStop.lng }
+      : ctx.position;
+  const dwellSoFar = stops.reduce((sum, s) => sum + s.dwellMinutes, 0);
+  const minutesToLastPoint = arrivesToday
+    ? route.durationMinutes + dwellSoFar
+    : stops.reduce((sum, s, i) => sum + (route!.legs[i]?.durationMinutes ?? 0) + s.dwellMinutes, 0);
+
+  const stayCandidates = await loadStayCandidates(ctx.db, {
+    tripId: ctx.trip.id,
+    planDate: ctx.planDate,
+    near: idealEnd,
+  });
+  const rankedStays =
+    stayCandidates.length === 0
+      ? []
+      : await evaluateStays({
+          candidates: stayCandidates,
+          lastPoint,
+          nextPoint,
+          departureIso: ctx.nowIso,
+          minutesToLastPoint,
+          weights: ctx.stayWeights,
+          maxDetourMinutes: ctx.maxStayDetourMinutes,
+          needStates: ctx.needStates,
+          sideQuests: ctx.pool.sideQuests,
+        });
+  const stay = chosenStay(rankedStays);
+
+  const tail: StopDraft[] = [];
+  if (arrival) tail.push(arrival);
+  if (stay) {
+    // A place cannot be both a stop along the way and the place we sleep; when
+    // the greedy fill already picked it, it becomes the endpoint instead of
+    // appearing twice in the same day.
+    const dupIdx = stops.findIndex((s) => s.poiId === stay.poiId);
+    if (dupIdx >= 0) stops.splice(dupIdx, 1);
+    tail.push({
+      name: stay.name,
+      lat: stay.lat,
+      lng: stay.lng,
+      poiId: stay.poiId,
+      waypointId: null,
+      needId: null,
+      purpose: PURPOSE_BY_STAY_KIND[stay.stayKind],
+      dwellMinutes: 0,
+      score: 0,
+    });
+  } else {
+    warnings.push({ severity: "urgent", message: noStayExplanation(rankedStays) });
+    if (!arrival) {
+      // The leg still has to end at a coordinate, but that coordinate is not a
+      // place and must never read as one. The old "End of day's drive" was a
+      // point on a road wearing the name of a destination — the one thing this
+      // application otherwise never does.
+      tail.push({
+        name: "Day's drive runs out here — no stay found",
+        lat: idealEnd.lat,
+        lng: idealEnd.lng,
+        poiId: null,
+        waypointId: null,
+        needId: null,
+        purpose: "drive",
+        dwellMinutes: 0,
+        score: 0,
+      });
+    }
+  }
+
+  const finalEnd = tail[tail.length - 1]!;
+  const finalPoint: LatLng = { lat: finalEnd.lat, lng: finalEnd.lng };
+  // Re-route only when the night actually moved the leg — an arrival-day with no
+  // stay ends exactly where we already routed to.
+  const finalCoords = [
+    ctx.position,
+    ...stops.map((s) => ({ lat: s.lat, lng: s.lng })),
+    ...tail.map((s) => ({ lat: s.lat, lng: s.lng })),
+  ];
+  const routedCoords = [ctx.position, ...stops.map((s) => ({ lat: s.lat, lng: s.lng })), endPoint];
+  if (JSON.stringify(finalCoords) !== JSON.stringify(routedCoords)) {
+    route = await osrmRoute(finalCoords, { overview: "full" });
+  }
+
+  // Continuation to the anchor through the remaining chain, from where we slept.
+  const continuation = await osrmRoute([finalPoint, ...ctx.chain], { overview: "simplified" });
 
   // Global budget honesty.
   const remainingAfter = ctx.remainingBudgetMinutes - route.durationMinutes - continuation.durationMinutes;
@@ -660,7 +776,7 @@ async function buildRole(
   }
 
   // Post-verify need honesty against the routed timeline.
-  const allStops = [...stops, end];
+  const allStops = [...stops, ...tail];
   const table = cumulativeTable(route, allStops);
   for (const state of ctx.needStates) {
     const { need, rate } = state;
@@ -686,12 +802,13 @@ async function buildRole(
   // fewer miles toward the anchor while spending the same hours. Saying how
   // far from the anchor each candidate ends makes the spectrum legible.
   const finalDest = ctx.chain[ctx.chain.length - 1]!;
-  const endsToGo = Math.round(haversineMiles({ lat: end.lat, lng: end.lng }, finalDest));
+  const endsToGo = Math.round(haversineMiles(finalPoint, finalDest));
   const summaryBits = [
     `${(route.durationMinutes / 60).toFixed(1)}h drive`,
     `${String(Math.round(route.distanceMiles))} mi`,
     `${String(allStops.length)} stops`,
-    arrivesToday ? `arrives at ${ctx.steer.name}` : `overnight at ${end.name}`,
+    ...(arrivesToday ? [`arrives at ${ctx.steer.name}`] : []),
+    stay ? `overnight at ${stay.name}` : "nowhere to stay found",
     `ends ${String(endsToGo)} mi from ${ctx.trip.destName}`,
   ];
 
@@ -707,6 +824,7 @@ async function buildRole(
     projectedGeometry: JSON.stringify({ type: "LineString", coordinates: continuation.geometry }),
     warnings,
     stops: allStops.map((s, i) => ({ ...s, ...table[i]! })),
+    stayOptions: rankedStays,
   };
 }
 
@@ -756,7 +874,7 @@ const PlanFingerprintSchema = z.object({ hash: z.string() });
  * makes the next replan rebuild once instead of serving the older engine's
  * work forever.
  */
-const ENGINE_REVISION = "2026-07-31-cluster";
+const ENGINE_REVISION = "2026-08-04-stays";
 
 const fingerprintKey = (tripId: number, planDate: string): string =>
   `plan-fingerprint:${String(tripId)}:${planDate}`;
@@ -821,6 +939,35 @@ export async function planStateFingerprint(
       ? null
       : ((await getSetting(db, driveHoursKey(tripId, planDate), DriveHoursSchema))?.value.hours ?? null);
 
+  // Where the night gets chosen from. The weights and the detour cap are read
+  // straight through, because moving a slider must replan.
+  const stayWeightRows = await db
+    .select({ factor: stayWeights.factor, weight: stayWeights.weight })
+    .from(stayWeights)
+    .where(eq(stayWeights.tripId, tripId))
+    .orderBy(asc(stayWeights.factor));
+  const stayDetourCap = (await staySettings(db)).maxDetourMinutes;
+  const stayPlanRows = await db
+    .select({ planDate: stayPlans.planDate, poiId: stayPlans.poiId, state: stayPlans.state })
+    .from(stayPlans)
+    .where(eq(stayPlans.tripId, tripId))
+    .orderBy(asc(stayPlans.planDate));
+  const siteTouched = (
+    await db.select({ updatedAt: staySites.updatedAt }).from(staySites).orderBy(desc(staySites.updatedAt)).limit(1)
+  )[0];
+  const siteCount = (await db.select({ n: count() }).from(staySites))[0];
+  // updatedAt, deliberately, and never fetchedAt: the availability job bumps
+  // fetchedAt on every check and updatedAt only when the answer actually
+  // changed. Hashing fetchedAt here would replan an unchanged day on every poll.
+  const availTouched = (
+    await db
+      .select({ updatedAt: stayAvailability.updatedAt })
+      .from(stayAvailability)
+      .orderBy(desc(stayAvailability.updatedAt))
+      .limit(1)
+  )[0];
+  const availCount = (await db.select({ n: count() }).from(stayAvailability))[0];
+
   const state = {
     // The fingerprint hashes state, not code — so a deployed engine change
     // would otherwise keep serving the plan built by the previous engine until
@@ -842,6 +989,11 @@ export async function planStateFingerprint(
     progress: { last: progressLast?.id ?? 0, n: progressCount?.n ?? 0 },
     rates: rateLast?.id ?? 0,
     pois: { last: poiLast?.id ?? 0, touched: poiTouched?.updatedAt ?? "", n: poiCount?.n ?? 0 },
+    stayWeights: stayWeightRows,
+    stayDetourCap,
+    stayPlans: stayPlanRows,
+    staySites: { touched: siteTouched?.updatedAt ?? "", n: siteCount?.n ?? 0 },
+    stayAvailability: { touched: availTouched?.updatedAt ?? "", n: availCount?.n ?? 0 },
   };
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }
@@ -910,6 +1062,28 @@ export async function persistCandidates(
         etaMinutesFromStart: s.etaMinutesFromStart,
         cumMiles: s.cumMiles,
         dwellMinutes: s.dwellMinutes,
+      });
+    }
+    // Every stay this candidate weighed, in rank order — including the ones it
+    // ruled out and why. This is what lets a weight slider re-rank tonight
+    // without touching the router, and what puts the runners-up on screen when
+    // the first choice turns out to be full.
+    for (let i = 0; i < c.stayOptions.length; i++) {
+      const s = c.stayOptions[i]!;
+      await db.insert(stayOptions).values({
+        candidateId,
+        poiId: s.poiId,
+        stayKind: s.stayKind,
+        marginalMinutes: s.marginalMinutes,
+        toStayMinutes: s.toStayMinutes,
+        fromStayMinutes: s.fromStayMinutes,
+        toStayMiles: s.toStayMiles,
+        arrivalIso: s.arrivalIso,
+        sunsetIso: s.sunsetIso,
+        factors: JSON.stringify(s.factors),
+        score: s.score,
+        excludedReason: s.excludedReason,
+        orderIndex: i,
       });
     }
   }

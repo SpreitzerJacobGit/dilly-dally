@@ -21,6 +21,7 @@ import {
 } from "./engine/candidates.js";
 import { digestHour, generateAndDeliverDigest, pushUrgentWarnings } from "./engine/digest.js";
 import { OsrmUnavailableError } from "./engine/osrm.js";
+import { STAY_AVAILABILITY_JOB, refreshStayAvailability } from "./engine/stayAvailability.js";
 
 export const MORNING_DIGEST_JOB = "vanlife-morning-digest";
 
@@ -104,5 +105,22 @@ export function createBespokeJobs(deps: {
     },
   };
 
-  return [poiJob, digestJob];
+  /**
+   * Availability is the only live input the planner has, so it is refreshed
+   * here and never inside a replan — see engine/stayAvailability.ts. Three
+   * hours is frequent enough that tonight's answer is worth something and
+   * infrequent enough to stay polite to a public endpoint; with no key
+   * configured the run records nothing at all.
+   */
+  const stayAvailabilityJob: IntervalJob = {
+    name: STAY_AVAILABILITY_JOB,
+    intervalMs: 3 * 3_600_000,
+    enabled: true,
+    run: async () => {
+      const result = await refreshStayAvailability(dbHandle.db, new Date().toISOString());
+      return result === "skipped" ? "skipped" : undefined;
+    },
+  };
+
+  return [poiJob, digestJob, stayAvailabilityJob];
 }

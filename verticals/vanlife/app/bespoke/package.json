@@ -29,6 +29,7 @@
     "@elements/storage-sqlite-drizzle": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "@trpc/react-query": "catalog:",
+    "h3-js": "catalog:",
     "lucide-react": "catalog:",
     "maplibre-gl": "catalog:",
     "zod": "catalog:"

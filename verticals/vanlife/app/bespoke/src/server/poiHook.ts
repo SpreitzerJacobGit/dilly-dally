@@ -1,8 +1,9 @@
 import { and, eq, sql, type Db } from "@elements/storage-sqlite-drizzle";
 import { poiSourceRuns, type OnPois, type PoiRegion } from "@elements/intake-poi-sources";
-import { pois, trips } from "../db/schema.js";
+import { pois, staySites, trips } from "../db/schema.js";
 import { anchorRegionCells, corridorRegionCells } from "./engine/pois.js";
 import { allPendingAnchors, loadAnchorTree } from "./engine/anchors.js";
+import { deriveStayFacts } from "./engine/stayFacts.js";
 
 /**
  * The bespoke half of POI intake: idempotent upsert on (source, sourceId) —
@@ -49,10 +50,38 @@ export const onPois: OnPois = async (db, records, _meta) => {
           set: { ...content, fetchedAt: now, updatedAt: now },
         });
     }
+    // A place we could sleep at also needs its stay facts, or the planner would
+    // only ever consider the campgrounds that happened to exist before this
+    // feature shipped. Same discipline as above: an unchanged derivation must
+    // leave updatedAt alone, because the fingerprint reads MAX(updated_at) here
+    // too and a nightly poll would otherwise replan every morning by itself.
+    const facts = deriveStayFacts(r);
+    if (facts) {
+      const row = (
+        await db
+          .select({ id: pois.id })
+          .from(pois)
+          .where(and(eq(pois.source, r.source), eq(pois.sourceId, r.sourceId)))
+      )[0];
+      if (row) await upsertStaySite(db, row.id, facts, now);
+    }
     upserted++;
   }
   return { upserted };
 };
+
+type StayFacts = NonNullable<ReturnType<typeof deriveStayFacts>>;
+
+async function upsertStaySite(db: Db, poiId: number, facts: StayFacts, now: string): Promise<void> {
+  const existing = (await db.select().from(staySites).where(eq(staySites.poiId, poiId)))[0];
+  if (existing) {
+    const unchanged = (Object.keys(facts) as (keyof StayFacts)[]).every((k) => existing[k] === facts[k]);
+    if (unchanged) return;
+    await db.update(staySites).set({ ...facts, updatedAt: now }).where(eq(staySites.poiId, poiId));
+    return;
+  }
+  await db.insert(staySites).values({ poiId, ...facts, updatedAt: now });
+}
 
 /**
  * Regions worth fetching = the active trip's corridor cells, nearest to the

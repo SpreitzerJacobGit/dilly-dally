@@ -71,6 +71,23 @@ Each day the application proposes candidate routes across a spectrum of ambition
 `[ROUTE-8]` Candidates prefer stops that share a trip: a place worth stopping for that sits beside a planned service stop is chosen over an equally good one far from it, and where two places servicing the same need cost nearly the same detour, the one nearest the day's best sights wins — never at the cost of dropping a service stop a need requires, exceeding the deviation budget, or changing the plan when nothing else changed.
 `[ROUTE-9]` How many hours the day is planned around can be set for today alone from the Today tab: it takes effect on the next replan, it leaves the trip's own pace and every Target's expected arrival untouched, and the following day reverts to the trip's pace on its own. The pace a new trip starts at is an application setting.
 
+## Where we stay the night {#stays}
+
+A day-leg ends where the night is spent, not at a point on the road. Four kinds of stay compete for it — a campground, a dispersed site, a hotel, or an overnight parking lot — ranked against the needs that are actually running down, with the reasons anything was ruled out kept in view.
+
+`[STAY-1]` Every candidate ends the day at a named place to stay, and when none can be found it says so and describes the endpoint as the reach of the day's drive rather than naming it as a place.
+`[STAY-2]` Campgrounds, dispersed sites, hotels and overnight parking are all offered for the same night, each showing its kind, what it costs, how many minutes it adds to the day, and what time we would arrive.
+`[STAY-3]` The stays a candidate did not pick stay visible and ranked, so a place that turns out to be full has alternatives already on screen rather than needing a replan to find them.
+`[STAY-4]` A stay is ruled out only for a stated reason — the road in needs high clearance, it adds more than the detour cap, we would arrive after dark somewhere unlit, or a source reported it full or closed — and how many were ruled out and why is shown rather than the list quietly being shorter.
+`[STAY-5]` What a night costs is shown wherever a stay is shown, and never rules a stay out by itself.
+`[STAY-6]` Per-trip weights re-rank the night's list as soon as they change, without recomputing any route; a weight of zero removes that kind of stay entirely, and when the new ranking favours somewhere other than where the route drives, the candidate says so and offers to re-route.
+`[STAY-7]` A stay that services a need close to running out outranks an equally convenient one that services nothing.
+`[STAY-8]` The minutes a stay adds are measured against carrying on toward tomorrow, not as a there-and-back detour, so a place further along the route costs close to nothing.
+`[STAY-9]` Availability is refreshed in the background and never while planning; it is always shown with when it was checked, and an answer that has not changed does not reshuffle the day's candidates.
+`[STAY-10]` A failed availability check is reported against the last known answer rather than replacing it — the application never forgets what it knew because it could not reach a source.
+`[STAY-11]` Either operator can record that tonight is booked, and a booked stay is the plan regardless of how it scores until it is cleared.
+`[STAY-12]` Whether a stay is on land where camping is permitted, has cell signal, or sits on a road anyone has verified is stated where it is known and admitted where it is not; with the optional overlays absent those factors say nothing rather than defaulting to an answer.
+
 ## The planning screen {#map}
 
 One screen: the map as the primary surface, with the Origin and Targets list, today's candidates, and the trip's numbers beside it.

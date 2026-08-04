@@ -6,6 +6,7 @@ import {
   needRates,
   needs,
   pois,
+  staySites,
   trips,
   waypoints,
 } from "../db/schema.js";
@@ -106,15 +107,37 @@ export const seedVanlifeData: SeedFn = {
 
     const poiStamp = iso(1);
     for (const p of FIXTURE_POIS) {
-      await db.insert(pois).values({
-        source: p.source,
-        sourceId: p.sourceId,
-        name: p.name,
-        category: p.category,
-        lat: p.lat,
-        lng: p.lng,
-        popularity: p.popularity,
-        fetchedAt: poiStamp,
+      const inserted = await db
+        .insert(pois)
+        .values({
+          source: p.source,
+          sourceId: p.sourceId,
+          name: p.name,
+          category: p.category,
+          lat: p.lat,
+          lng: p.lng,
+          popularity: p.popularity,
+          fetchedAt: poiStamp,
+          updatedAt: poiStamp,
+        })
+        .returning({ id: pois.id });
+      if (!p.stay) continue;
+      // Everything the fixture leaves unsaid stays unknown: an unpriced site is
+      // not free and an untagged road is not passable.
+      await db.insert(staySites).values({
+        poiId: inserted[0]!.id,
+        stayKind: p.stay.stayKind,
+        nightlyCostUsd: p.stay.nightlyCostUsd ?? null,
+        hookupElectric: p.stay.hookupElectric ?? false,
+        hookupWater: p.stay.hookupWater ?? false,
+        dumpStation: p.stay.dumpStation ?? false,
+        showers: p.stay.showers ?? false,
+        laundryOnSite: p.stay.laundryOnSite ?? false,
+        reservable: p.stay.reservable ?? "unknown",
+        access: p.stay.access ?? "unknown",
+        maxNights: p.stay.maxNights ?? null,
+        lastReportedAt: poiStamp,
+        confidence: p.stay.confidence ?? "unverified",
         updatedAt: poiStamp,
       });
     }
