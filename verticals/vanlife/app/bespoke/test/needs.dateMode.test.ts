@@ -143,8 +143,6 @@ describe("loadNeedStates — a date need in the shape every reader expects", () 
       .values({
         key: "oil-change",
         title: "Oil change",
-        unit: "days",
-        capacity: 1,
         direction: "depletes",
         warnRatio: 0.25,
         urgentRatio: 0.1,
@@ -186,15 +184,14 @@ describe("loadNeedStates — a date need in the shape every reader expects", () 
     await insertNeed({
       key: "water",
       title: "Fresh water",
-      unit: "gal",
-      capacity: 40,
       trackingMode: "level",
       dueAt: null,
       routingDriver: true,
     });
     const [state] = await loadNeedStates(handle.db, null, NOW);
-    // No check-ins and no rate: full tank, by the trip-start assumption.
-    expect(state!.level).toBe(40);
+    // No check-ins and no rate: full tank, by the trip-start assumption — and a
+    // full tank is 100%, not a per-need capacity.
+    expect(state!.level).toBe(100);
     expect(state!.urgency).toBe("ok");
   });
 

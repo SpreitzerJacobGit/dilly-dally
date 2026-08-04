@@ -4,7 +4,7 @@ Behavioral requirements only. No component names, no versions, no architecture.
 
 ## Summary
 
-Dilly-Dally is the planning layer for a couple living and working from a van. Given an Origin and a final Target (say, Portland to Las Vegas), it proposes a handful of candidate routes each day — from "most direct" down to side-quest-tier detours — all inside a deviation budget of twice the straight-shot duration. It tracks the recurring needs of van life (food, gas, water, laundry, trash, waste-water, electric hookup) as estimated levels that drain with time and miles, and it weaves the stops that satisfy them into the day's routes before anything runs dry or overflows. Both operators are equals: either can check in a chore, pick a route, or reshape the plan. A morning digest summarizes progress and looming deadlines. The application plans; it never navigates turn-by-turn.
+Dilly-Dally is the planning layer for a couple living and working from a van. Given an Origin and a final Target (say, Portland to Las Vegas), it proposes a handful of candidate routes each day — from "most direct" down to side-quest-tier detours — all inside a deviation budget of twice the straight-shot duration. It tracks the recurring needs of van life (food, gas, water, laundry, trash, waste-water, electric hookup) as estimated percentages that drain with time and miles, and it weaves the stops that satisfy them into the day's routes before anything runs dry or overflows. Both operators are equals: either can check in a chore, pick a route, or reshape the plan. A morning digest summarizes progress and looming deadlines. The application plans; it never navigates turn-by-turn.
 
 ## Trips, Origin & Targets {#trips}
 
@@ -24,17 +24,17 @@ A trip is an **Origin** and an ordered list of **Targets**. The last Target is t
 
 ## Recurring needs & levels {#needs}
 
-Every recurring need is tracked one of two ways: as an estimated level with a capacity, a consumption rate, and a threshold; or as a date it falls due. Estimates are honest about being estimates.
+Every recurring need is tracked one of two ways: as an estimated level running 0-100% with a drain rate and a threshold; or as a date it falls due. Estimates are honest about being estimates.
 
-`[NEED-1]` The statuses screen lists every tracked need with its unit, capacity, current estimated level, consumption rate, and projected time until it runs dry or overflows.
+`[NEED-1]` The statuses screen lists every tracked need with its current estimated level as a percentage, how fast it drains — stated both as a percentage per day or per hundred miles and as how long a full tank lasts — and the projected time until it runs dry or overflows.
 `[NEED-2]` A need's displayed level is always labeled as an estimate with the time it was computed from, and is derived from the last check-in, the configured rate, and elapsed time and recorded miles — the application never presents it as a measured value.
 `[NEED-3]` A need projected to run dry or overflow before its next planned service stop is flagged as urgent everywhere it appears.
-`[NEED-4]` Editing a need's capacity, rate, or threshold immediately changes every projection; the application may suggest a refined rate derived from check-in history, and a suggestion never applies itself — an operator must accept it.
+`[NEED-4]` Editing a need's rate or threshold immediately changes every projection; a rate is entered as the range a full tank lasts — days, or miles for anything driving consumes — rather than as a percentage per unit. The application may suggest a refined rate derived from check-in history, and a suggestion never applies itself — an operator must accept it.
 `[NEED-5]` Work internet appears as a tracked concern on the statuses screen but never generates route stops — it is a checklist item, not a routing driver.
 `[NEED-6]` Tapping a tracked need that drives routing lists the places that can service it, each showing how far it is from the current position and how many minutes it would add to today's chosen route, orderable by either measure; the list is drawn from places already stored on the van server, so it works with no internet.
 `[NEED-7]` Adding a place from that list pins it for the trip and regenerates the day's candidates so it appears as a stop wherever it is feasible; a place already pinned is shown as pinned and can be released from the same row.
 `[NEED-8]` The statuses screen has a default view for reading levels and recording check-ins, and an edit mode that manages the tracked set itself; creation, renaming, retuning, archiving and deletion live only in edit mode, so none of them can be reached by a mistap on the daily screen.
-`[NEED-9]` A need is tracked either by level — a capacity that drains at a rate — or by date, meaning it simply falls due on a day with no capacity and no drain; either mode can be created directly, and an existing need can be switched between them without losing its check-in history.
+`[NEED-9]` A need is tracked either by level — a percentage from 0 to 100 that drains at a rate, with no per-need unit or capacity anywhere — or by date, meaning it simply falls due on a day with no level and no drain; either mode can be created directly, and an existing need can be switched between them without losing its check-in history.
 `[NEED-10]` A date-tracked need becomes warn and then urgent a configurable number of days before it falls due, and never generates route stops on its own; when it names a repeat interval, a check-in rolls its due date forward by that interval, and undoing that check-in rolls it back.
 `[NEED-11]` A need is archived rather than deleted by default: archiving hides it from every screen and projection while keeping its history, and it can be restored. Permanent deletion, which also removes every check-in and rate recorded against it, is offered only for an already-archived need and only behind a confirmation that names what is lost.
 
@@ -42,7 +42,7 @@ Every recurring need is tracked one of two ways: as an estimated level with a ca
 
 Levels change only through check-ins. One tap records the common case; a quantity refines it.
 
-`[CHK-1]` A one-tap check-in ("dumped tanks", "filled water", "grocery run done") records the event as a full reset of that need; an optional quantity records a partial fill or dump instead.
+`[CHK-1]` A one-tap check-in ("dumped tanks", "filled water", "grocery run done") records the event as a full reset of that need; an optional percentage records a partial fill or dump instead, and a level correction can be picked straight off a gauge as full, three-quarters, half, a quarter or empty.
 `[CHK-2]` No control anywhere edits a level number directly — levels change only through check-ins (including an explicit "set level" correction check-in), and a mistake is corrected by recording another check-in.
 `[CHK-3]` Every check-in records who recorded it and when, and appears in that need's history newest first.
 `[CHK-4]` Recording a check-in immediately updates the need's level, its projected deadline, and any urgency flags derived from them.
@@ -109,4 +109,4 @@ The van server is the source of truth; the internet is optional.
 
 ## First-run experience
 
-The application arrives with a realistic seeded trip — Portland, OR to Las Vegas, NV, routed through California via an Eastern Sierra area Target — two operator accounts, all seven needs configured with plausible capacities, rates, and part-consumed levels, a short check-in history, and a set of seeded places along the corridor. A first-time visitor can sign in and immediately see candidates on the map, a meaningful needs outlook, and a digest preview. Exact seeded contents are specified alongside the seed data itself.
+The application arrives with a realistic seeded trip — Portland, OR to Las Vegas, NV, routed through California via an Eastern Sierra area Target — two operator accounts, all eight needs configured with plausible drain ranges and part-consumed levels, a short check-in history, and a set of seeded places along the corridor. A first-time visitor can sign in and immediately see candidates on the map, a meaningful needs outlook, and a digest preview. Exact seeded contents are specified alongside the seed data itself.

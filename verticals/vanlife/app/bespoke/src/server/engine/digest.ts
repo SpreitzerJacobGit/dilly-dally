@@ -4,6 +4,7 @@ import { getSetting } from "@elements/lifecycle-app-settings";
 import { createNtfyPublisher, type PublishResult } from "@elements/output-ntfy-push";
 import type { AppLogger } from "@elements/observability-structured-logging";
 import { digests, routeCandidates } from "../../db/schema.js";
+import { formatRunway } from "../../shared/levels.js";
 import { loadNeedStates } from "./needs.js";
 import { budgetUsage, planDateOf, type CandidateWarning, type TripRow } from "./candidates.js";
 
@@ -22,7 +23,8 @@ export interface DigestBody {
     title: string;
     urgency: string;
     runway: number;
-    unit: string;
+    /** Runway means percentage points for a level need and DAYS for a date one. */
+    trackingMode: string;
     deadlineAt: string | null;
   }[];
   /** The honest cut: empty means "nothing is urgent", and says so. */
@@ -63,13 +65,15 @@ export async function composeDigest(
       title: s.need.title,
       urgency: s.urgency,
       runway: s.runway,
-      unit: s.need.unit,
+      trackingMode: s.need.trackingMode,
       deadlineAt: s.deadlineAt,
     }));
 
   const important: string[] = [];
   for (const s of needStates) {
-    if (s.urgency === "urgent") important.push(`${s.need.title}: ${String(s.runway)} ${s.need.unit} of headroom left.`);
+    if (s.urgency === "urgent") {
+      important.push(`${s.need.title}: ${formatRunway(s.runway, s.need.trackingMode)} of headroom left.`);
+    }
   }
   for (const c of candidates) {
     for (const w of c.warnings) {
@@ -114,7 +118,7 @@ export function renderDigestText(body: DigestBody): string {
     lines.push("");
     lines.push("Coming up:");
     for (const n of body.needOutlook) {
-      lines.push(`- ${n.title}: ${String(n.runway)} ${n.unit} headroom${n.deadlineAt ? `, deadline ${n.deadlineAt.slice(0, 16).replace("T", " ")}` : ""} [${n.urgency}]`);
+      lines.push(`- ${n.title}: ${formatRunway(n.runway, n.trackingMode)} headroom${n.deadlineAt ? `, deadline ${n.deadlineAt.slice(0, 16).replace("T", " ")}` : ""} [${n.urgency}]`);
     }
   }
   return lines.join("\n");

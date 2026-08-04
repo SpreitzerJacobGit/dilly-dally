@@ -529,7 +529,15 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           utils.needs.list.setData(undefined, (prev) =>
             prev?.map((s) =>
               s.need.id === req.needId && req.kind === "service" && req.quantity === undefined
-                ? { ...s, runway: s.need.capacity, runwayRatio: 1, urgency: "ok" as const }
+                ? {
+                    ...s,
+                    // The gauge caption reads `level`, so patching runway alone would
+                    // show a full bar over a stale percentage until the sync lands.
+                    level: s.need.direction === "accumulates" ? 0 : 100,
+                    runway: 100,
+                    runwayRatio: 1,
+                    urgency: "ok" as const,
+                  }
                 : s,
             ),
           );

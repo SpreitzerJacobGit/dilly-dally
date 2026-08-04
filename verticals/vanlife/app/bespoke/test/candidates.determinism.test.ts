@@ -139,10 +139,11 @@ beforeAll(async () => {
   });
 
   // Water is close enough to its floor that a service stop is forced today;
-  // food has days of runway and stays a non-stop.
+  // food has days of runway and stays a non-stop. Percentages: water was 12 gal
+  // of 40 at 6 gal/day, food 7 days of runway at 1/day.
   const needSeeds = [
-    { key: "water", title: "Fresh water", unit: "gal", capacity: 40, poiCategory: "water-fill", ratePerDay: 6, checkIn: { kind: "set-level", quantity: 12, at: daysAgo(0.5) } },
-    { key: "food", title: "Food", unit: "days", capacity: 7, poiCategory: "grocery", ratePerDay: 1, checkIn: { kind: "service", quantity: null, at: daysAgo(3) } },
+    { key: "water", title: "Fresh water", poiCategory: "water-fill", ratePerDay: 15, checkIn: { kind: "set-level", quantity: 30, at: daysAgo(0.5) } },
+    { key: "food", title: "Food", poiCategory: "grocery", ratePerDay: 100 / 7, checkIn: { kind: "service", quantity: null, at: daysAgo(3) } },
   ];
   for (const [i, seed] of needSeeds.entries()) {
     const needId = (
@@ -151,8 +152,6 @@ beforeAll(async () => {
         .values({
           key: seed.key,
           title: seed.title,
-          unit: seed.unit,
-          capacity: seed.capacity,
           direction: "depletes",
           warnRatio: 0.25,
           urgentRatio: 0.1,

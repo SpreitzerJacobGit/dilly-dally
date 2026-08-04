@@ -9,10 +9,19 @@ import {
   isDateTracked,
   type NeedStateView,
 } from "../components/NeedsStrip.js";
-import { CheckInBar, type CheckInRequest } from "../components/CheckInBar.js";
-import { FormModal } from "../components/FormModal.js";
+import { CheckInBar, QuantityModal, type CheckInRequest } from "../components/CheckInBar.js";
+import { FormModal, type FieldSpec } from "../components/FormModal.js";
 import { ConfirmModal } from "../components/ConfirmModal.js";
 import { newClientId } from "../lib/checkinQueue.js";
+import {
+  daysPerTank,
+  isAccumulating,
+  milesPerTank,
+  pctLabel,
+  percentPer100Miles,
+  round1,
+} from "../lib/levels.js";
+import { rateFromRange } from "../../shared/levels.js";
 import { readGrantedFix } from "../lib/geocode.js";
 import { VL_STYLES } from "../styles.js";
 
@@ -29,7 +38,6 @@ import { VL_STYLES } from "../styles.js";
 
 type NeedRowView = NeedStateView & {
   need: NeedStateView["need"] & {
-    direction: string;
     warnRatio: number;
     urgentRatio: number;
     warnDays: number | null;
@@ -37,7 +45,13 @@ type NeedRowView = NeedStateView & {
     serviceIntervalDays: number | null;
   };
   rate: { ratePerDay: number; ratePerMile: number; source: string };
-  suggestion: { ratePerDay: number; ratePerMile: number; samples: number } | null;
+  suggestion: {
+    ratePerDay: number;
+    ratePerMile: number;
+    samples: number;
+    currentPerDay: number;
+    currentPerMile: number;
+  } | null;
 };
 
 type Dialog =
@@ -45,7 +59,7 @@ type Dialog =
   | { kind: "add-date" }
   | { kind: "rename"; row: NeedRowView }
   | { kind: "set-level"; row: NeedRowView }
-  | { kind: "capacity"; row: NeedRowView }
+  | { kind: "thresholds"; row: NeedRowView }
   | { kind: "rate"; row: NeedRowView }
   | { kind: "due"; row: NeedRowView }
   | { kind: "lead-times"; row: NeedRowView }
@@ -53,6 +67,69 @@ type Dialog =
   | { kind: "to-level"; row: NeedRowView }
   | { kind: "delete"; row: NeedRowView }
   | null;
+
+/**
+ * A drain rate, asked for as the range an operator actually knows: how long a
+ * full tank lasts. A select picks the driver rather than two optional fields,
+ * because FormModal validates strictly per-field — "exactly one of these" is
+ * unexpressible there, and a need that drained 22%/mile AND 15%/day would be
+ * saveable and wrong.
+ *
+ * Direction-neutral wording on purpose: `direction` is itself editable on the
+ * create form, and FieldSpec.label is a static string, so it cannot follow.
+ */
+function rateFields(rate: { ratePerDay: number; ratePerMile: number }): FieldSpec[] {
+  const days = daysPerTank(rate.ratePerDay);
+  const miles = milesPerTank(rate.ratePerMile);
+  return [
+    {
+      name: "driver",
+      label: "What uses it up",
+      type: "select",
+      defaultValue: miles !== null ? "miles" : days !== null ? "days" : "none",
+      options: [
+        { value: "days", label: "Time — it changes whether you drive or not" },
+        { value: "miles", label: "Driving — it changes with the miles" },
+        { value: "none", label: "Nothing — it never changes on its own" },
+      ],
+    },
+    {
+      name: "daysPerTank",
+      label: "A full tank lasts (days)",
+      type: "number",
+      min: 0.1,
+      max: 3650,
+      step: "0.1",
+      required: true,
+      defaultValue: days === null ? "" : String(round1(days)),
+      hint: "How many days it takes to go from completely full to completely empty.",
+      showIf: (v) => v.driver === "days",
+    },
+    {
+      name: "milesPerTank",
+      label: "A full tank lasts (miles)",
+      type: "number",
+      min: 1,
+      max: 10000,
+      step: "1",
+      required: true,
+      defaultValue: miles === null ? "" : String(Math.round(miles)),
+      hint: "How far you can drive on a completely full tank.",
+      showIf: (v) => v.driver === "miles",
+    },
+  ];
+}
+
+/**
+ * The stored rates a submitted rate form implies. Unrounded on purpose, so
+ * opening the dialog and saving it unchanged returns the same displayed range.
+ */
+function rateValues(v: Record<string, string>): { ratePerDay: number; ratePerMile: number } {
+  return {
+    ratePerDay: v.driver === "days" ? rateFromRange(Number(v.daysPerTank)) : 0,
+    ratePerMile: v.driver === "miles" ? rateFromRange(Number(v.milesPerTank)) : 0,
+  };
+}
 
 const POI_CATEGORIES = [
   "campground",
@@ -171,14 +248,63 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
       const repeat = s.need.serviceIntervalDays ? ` · every ${String(s.need.serviceIntervalDays)}d` : "";
       return `due ${dueDateLabel(s.need.dueAt)}${repeat}`;
     }
-    return `${String(s.level)} / ${String(s.need.capacity)} ${s.need.unit} (as of ${s.asOf.slice(11, 16)})`;
+    // "est." carries the never-a-measurement requirement into the table, which
+    // otherwise leans entirely on the paragraph at the top of the page.
+    return `est. ${pctLabel(s.level)} full (as of ${s.asOf.slice(11, 16)})`;
   }
 
+  /**
+   * Both halves of the rate: the stored percentage, and the range it was
+   * entered as. The range is what makes the number checkable against the van.
+   */
   function rateCell(s: NeedRowView): string {
     if (isDateTracked(s)) return "—";
-    return s.rate.ratePerMile > 0
-      ? `${String(s.rate.ratePerMile)} ${s.need.unit}/mi`
-      : `${String(s.rate.ratePerDay)} ${s.need.unit}/day`;
+    const verb = isAccumulating(s.need) ? "fills" : "drains";
+    const miles = milesPerTank(s.rate.ratePerMile);
+    if (miles !== null) {
+      const span = isAccumulating(s.need) ? `full in ${String(Math.round(miles))} mi` : `${String(Math.round(miles))} mi per tank`;
+      return `${verb} ${String(round1(percentPer100Miles(s.rate.ratePerMile)))}% per 100 mi · ${span}`;
+    }
+    const days = daysPerTank(s.rate.ratePerDay);
+    if (days !== null) {
+      const span = isAccumulating(s.need) ? `full in ${String(round1(days))} days` : `${String(round1(days))} days per tank`;
+      return `${verb} ${String(round1(s.rate.ratePerDay))}% per day · ${span}`;
+    }
+    return isAccumulating(s.need) ? "never fills" : "never drains";
+  }
+
+  /**
+   * A refined rate, restated as a range. The "you have" half comes from the
+   * suggestion's own currentPer* — the values its >15% test compared against —
+   * rather than re-reading the rate, and both go through the null-guarded
+   * inversions because a never-rated need carries a current of 0.
+   */
+  function suggestionCell(
+    s: NeedRowView,
+    suggestion: NonNullable<NeedRowView["suggestion"]>,
+  ): JSX.Element {
+    const perMile = suggestion.ratePerMile > 0;
+    const proposed = perMile ? milesPerTank(suggestion.ratePerMile) : daysPerTank(suggestion.ratePerDay);
+    const current = perMile ? milesPerTank(suggestion.currentPerMile) : daysPerTank(suggestion.currentPerDay);
+    const unitWord = perMile ? "mi" : "days";
+    const fmt = (n: number): string => (perMile ? String(Math.round(n)) : String(round1(n)));
+    const span = isAccumulating(s.need) ? "to fill" : "per tank";
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+        <small style={{ color: "#666" }}>
+          Your last {String(suggestion.samples)} {isAccumulating(s.need) ? "dumps" : "fills"} suggest{" "}
+          {proposed === null ? "no drain" : `${fmt(proposed)} ${unitWord} ${span}`}
+          {current === null ? " (none set)" : ` — you have ${fmt(current)}`}.
+        </small>
+        <button
+          className="vl-checkin-btn"
+          onClick={() => acceptSuggestion.mutate({ needId: s.need.id })}
+          title={`From the ${String(suggestion.samples)} most recent full-service intervals — nothing changes unless you accept.`}
+        >
+          Accept
+        </button>
+      </span>
+    );
   }
 
   function trackedByCell(s: NeedRowView): JSX.Element {
@@ -232,21 +358,7 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
               {
                 key: "suggestion",
                 header: "Suggested rate",
-                render: (s) =>
-                  s.suggestion ? (
-                    <button
-                      className="vl-checkin-btn"
-                      onClick={() => acceptSuggestion.mutate({ needId: s.need.id })}
-                      title={`From ${String(s.suggestion.samples)} check-in samples — applies only if you accept`}
-                    >
-                      Accept{" "}
-                      {s.suggestion.ratePerMile !== s.rate.ratePerMile
-                        ? `${String(Math.round(s.suggestion.ratePerMile * 1000) / 1000)} ${s.need.unit}/mi`
-                        : `${String(Math.round(s.suggestion.ratePerDay * 100) / 100)} ${s.need.unit}/day`}
-                    </button>
-                  ) : (
-                    "—"
-                  ),
+                render: (s) => (s.suggestion ? suggestionCell(s, s.suggestion) : "—"),
               },
               {
                 key: "history",
@@ -320,8 +432,8 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
                         <button className="vl-checkin-btn" onClick={() => setDialog({ kind: "set-level", row: s })}>
                           Set level
                         </button>
-                        <button className="vl-checkin-btn" onClick={() => setDialog({ kind: "capacity", row: s })}>
-                          Capacity
+                        <button className="vl-checkin-btn" onClick={() => setDialog({ kind: "thresholds", row: s })}>
+                          Thresholds
                         </button>
                         <button className="vl-checkin-btn" onClick={() => setDialog({ kind: "rate", row: s })}>
                           Rate
@@ -399,12 +511,13 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
               {
                 key: "what",
                 header: "What",
-                render: (c) =>
-                  c.kind === "set-level"
-                    ? `Corrected level to ${String(c.quantity)}`
-                    : c.quantity === null
-                      ? "Full service"
-                      : `Partial service: ${String(c.quantity)}`,
+                render: (c) => {
+                  const row = all.find((s) => s.need.id === historyNeedId);
+                  const emptying = row ? isAccumulating(row.need) : false;
+                  if (c.kind === "set-level") return `Corrected level to ${pctLabel(c.quantity ?? 0)}`;
+                  if (c.quantity === null) return emptying ? "Emptied" : "Filled up";
+                  return `${emptying ? "Emptied by" : "Topped up by"} ${pctLabel(c.quantity)}`;
+                },
               },
               { key: "who", header: "Who", render: (c) => c.recordedByEmail },
               { key: "note", header: "Note", render: (c) => c.note ?? "—" },
@@ -428,12 +541,10 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
       {dialog?.kind === "add-level" ? (
         <FormModal
           title="New level status"
-          hint="Something with a tank or a shelf: it holds an amount, and that amount drains."
+          hint="Something with a tank or a shelf. Its level is a plain 0-100%, and it drains or fills over time."
           submitLabel="Add"
           fields={[
             { name: "title", label: "Name", placeholder: "Propane", required: true },
-            { name: "unit", label: "Unit", placeholder: "gal", defaultValue: "units", required: true },
-            { name: "capacity", label: "Capacity", type: "number", min: 0.01, required: true },
             {
               name: "direction",
               label: "Direction",
@@ -444,15 +555,7 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
                 { value: "accumulates", label: "Accumulates toward full (trash, waste)" },
               ],
             },
-            { name: "ratePerDay", label: "Rate per day", type: "number", min: 0, defaultValue: "0" },
-            {
-              name: "ratePerMile",
-              label: "Rate per mile",
-              type: "number",
-              min: 0,
-              defaultValue: "0",
-              hint: "Use this instead of per-day for anything driving consumes.",
-            },
+            ...rateFields({ ratePerDay: 0, ratePerMile: 0 }),
             {
               name: "poiCategory",
               label: "Serviced by",
@@ -468,12 +571,9 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
           onSubmit={(v) =>
             create.mutate({
               title: v.title ?? "",
-              unit: v.unit ?? "units",
               trackingMode: "level",
-              capacity: Number(v.capacity),
               direction: v.direction === "accumulates" ? "accumulates" : "depletes",
-              ratePerDay: Number(v.ratePerDay ?? 0),
-              ratePerMile: Number(v.ratePerMile ?? 0),
+              ...rateValues(v),
               poiCategory: (v.poiCategory ?? "") === "" ? null : (v.poiCategory ?? null),
             })
           }
@@ -516,89 +616,53 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
       {dialog?.kind === "rename" ? (
         <FormModal
           title={`Rename ${dialog.row.need.title}`}
-          fields={
-            isDateTracked(dialog.row)
-              ? [{ name: "title", label: "Name", defaultValue: dialog.row.need.title, required: true }]
-              : [
-                  { name: "title", label: "Name", defaultValue: dialog.row.need.title, required: true },
-                  { name: "unit", label: "Unit", defaultValue: dialog.row.need.unit, required: true },
-                ]
-          }
-          onSubmit={(v) =>
-            configure.mutate({
-              needId: dialog.row.need.id,
-              title: v.title,
-              ...(v.unit === undefined ? {} : { unit: v.unit }),
-            })
-          }
+          fields={[{ name: "title", label: "Name", defaultValue: dialog.row.need.title, required: true }]}
+          onSubmit={(v) => configure.mutate({ needId: dialog.row.need.id, title: v.title })}
           onClose={() => setDialog(null)}
         />
       ) : null}
 
+      {/* The same modal the daily bar uses, rather than a second level-correction
+          UI that has to be kept in agreement with it — and the manager gets the
+          quick-picks for free. */}
       {dialog?.kind === "set-level" ? (
-        <FormModal
-          title={`${dialog.row.need.title} — correct the level`}
-          hint="Records a check-in, so the log and the level stay in agreement."
-          submitLabel="Record"
-          fields={[
-            {
-              name: "level",
-              label: `Actual level right now (${dialog.row.need.unit})`,
-              type: "number",
-              min: 0,
-              max: dialog.row.need.capacity,
-              defaultValue: String(dialog.row.level),
-              required: true,
-            },
-            { name: "note", label: "Note", placeholder: "Optional" },
-          ]}
-          onSubmit={(v) =>
-            void handleCheckIn({
-              needId: dialog.row.need.id,
-              kind: "set-level",
-              quantity: Number(v.level),
-              note: (v.note ?? "").trim() === "" ? undefined : v.note,
-            })
-          }
+        <QuantityModal
+          state={dialog.row}
+          defaultMode="set-level"
+          onSubmit={handleCheckIn}
           onClose={() => setDialog(null)}
         />
       ) : null}
 
-      {dialog?.kind === "capacity" ? (
+      {dialog?.kind === "thresholds" ? (
         <FormModal
-          title={`${dialog.row.need.title} — capacity & thresholds`}
+          title={`${dialog.row.need.title} — warning thresholds`}
+          hint="Thresholds are a percentage of the tank — the same 0-100 the level uses."
           fields={[
-            {
-              name: "capacity",
-              label: `Capacity (${dialog.row.need.unit})`,
-              type: "number",
-              min: 0.01,
-              defaultValue: String(dialog.row.need.capacity),
-              required: true,
-            },
             {
               name: "warnRatio",
-              label: "Warn below (% of capacity)",
+              label: isAccumulating(dialog.row.need) ? "Warn with less space left than (%)" : "Warn below (%)",
               type: "number",
               min: 0,
               max: 90,
               defaultValue: String(Math.round(dialog.row.need.warnRatio * 100)),
               required: true,
+              hint: "How little headroom is left before this starts asking for attention.",
             },
             {
               name: "urgentRatio",
-              label: "Urgent below (% of capacity)",
+              label: isAccumulating(dialog.row.need) ? "Urgent with less space left than (%)" : "Urgent below (%)",
               type: "number",
               min: 0,
               max: 50,
               defaultValue: String(Math.round(dialog.row.need.urgentRatio * 100)),
               required: true,
+              hint: "How little headroom is left before this jumps the queue.",
             },
           ]}
           onSubmit={(v) =>
             configure.mutate({
               needId: dialog.row.need.id,
-              capacity: Number(v.capacity),
               warnRatio: Number(v.warnRatio) / 100,
               urgentRatio: Number(v.urgentRatio) / 100,
             })
@@ -609,33 +673,10 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
 
       {dialog?.kind === "rate" ? (
         <FormModal
-          title={`${dialog.row.need.title} — consumption rate`}
-          hint="Projections everywhere recompute immediately."
-          fields={[
-            {
-              name: "ratePerDay",
-              label: `Per day (${dialog.row.need.unit}/day)`,
-              type: "number",
-              min: 0,
-              defaultValue: String(dialog.row.rate.ratePerDay),
-              required: true,
-            },
-            {
-              name: "ratePerMile",
-              label: `Per mile (${dialog.row.need.unit}/mi, 0 for none)`,
-              type: "number",
-              min: 0,
-              defaultValue: String(dialog.row.rate.ratePerMile),
-              required: true,
-            },
-          ]}
-          onSubmit={(v) =>
-            setRate.mutate({
-              needId: dialog.row.need.id,
-              ratePerDay: Number(v.ratePerDay),
-              ratePerMile: Number(v.ratePerMile),
-            })
-          }
+          title={`${dialog.row.need.title} — how fast it ${isAccumulating(dialog.row.need) ? "fills" : "drains"}`}
+          hint="Enter it the way you actually know it: how long a full tank lasts. Projections everywhere recompute immediately."
+          fields={rateFields(dialog.row.rate)}
+          onSubmit={(v) => setRate.mutate({ needId: dialog.row.need.id, ...rateValues(v) })}
           onClose={() => setDialog(null)}
         />
       ) : null}
@@ -748,11 +789,9 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
       {dialog?.kind === "to-level" ? (
         <FormModal
           title={`Track ${dialog.row.need.title} by level`}
-          hint="It stops counting down to a day and starts draining from a capacity."
+          hint="It stops counting down to a day and starts tracking a level from 0 to 100%. Set how fast it drains with Rate — until then it holds at full."
           submitLabel="Switch"
           fields={[
-            { name: "unit", label: "Unit", placeholder: "gal", defaultValue: "units", required: true },
-            { name: "capacity", label: "Capacity", type: "number", min: 0.01, required: true },
             {
               name: "direction",
               label: "Direction",
@@ -768,8 +807,6 @@ export function StatusesPage(_props: { user: PageUser }): JSX.Element {
             configure.mutate({
               needId: dialog.row.need.id,
               trackingMode: "level",
-              unit: v.unit,
-              capacity: Number(v.capacity),
               direction: v.direction === "accumulates" ? "accumulates" : "depletes",
               dueAt: null,
             })

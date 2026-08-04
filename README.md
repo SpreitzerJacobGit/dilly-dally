@@ -5,7 +5,7 @@ A trip planner for two people living and working out of a van.
 Give it an Origin and a final Target and it proposes three to five candidate routes each morning —
 from "most direct" down to side-quest-tier detours — every one of them inside a deviation
 budget of twice the straight-shot duration. It tracks the recurring needs of van life (food,
-gas, water, laundry, trash, waste-water, electric hookup) as estimated levels that drain with
+gas, water, laundry, trash, waste-water, electric hookup) as estimated percentages that drain with
 time and miles, and weaves the stops that service them into the day's routes before anything
 runs dry or overflows.
 
@@ -30,6 +30,10 @@ most of the design:
 - **Levels are honest estimates, never measurements.** A level is always labeled as an
   estimate, derived from the last check-in plus configured rate plus elapsed time and recorded
   miles. Nothing edits a level number directly — levels change only through check-ins.
+- **A level is a percentage, not a quantity.** Every tracked consumable runs 0 to 100
+  whether it holds water, fuel or trash, because a percentage is what you can read off a
+  gauge without converting. Drain rates are entered as the range a full tank lasts — 450
+  miles of fuel, six days of waste-water capacity — and stored as percent per day or mile.
 - **Degradation is visible, never silent.** Every POI source reports itself in exactly one
   honest state (unconfigured / never-checked / healthy / erroring, with the error and time).
   A failed push shows its error rather than the app claiming a digest was sent.

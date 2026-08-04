@@ -11,6 +11,7 @@ import {
 } from "../db/schema.js";
 import {
   FIXTURE_NEEDS,
+  fixtureRates,
   FIXTURE_POIS,
   FIXTURE_TRIP,
   FIXTURE_ANCHOR,
@@ -72,8 +73,6 @@ export const seedVanlifeData: SeedFn = {
           .values({
             key: need.key,
             title: need.title,
-            unit: need.unit,
-            capacity: need.capacity,
             direction: need.direction,
             warnRatio: need.warnRatio,
             urgentRatio: need.urgentRatio,
@@ -86,8 +85,7 @@ export const seedVanlifeData: SeedFn = {
       )[0]!;
       await db.insert(needRates).values({
         needId: inserted.id,
-        ratePerDay: need.ratePerDay,
-        ratePerMile: need.ratePerMile,
+        ...fixtureRates(need),
         source: "manual",
         effectiveFrom: iso(30),
         note: "Initial manual estimate",

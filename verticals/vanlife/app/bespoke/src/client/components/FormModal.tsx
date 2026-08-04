@@ -14,6 +14,16 @@ export interface FieldSpec {
   options?: { value: string; label: string }[];
   /** Shown under the field; for explaining what a threshold or interval means. */
   hint?: string;
+  /**
+   * Render and validate this field only when the form's current values satisfy
+   * this. Validation here is strictly per-field, so "exactly one of these two"
+   * is otherwise unexpressible — a select that hides the irrelevant field makes
+   * the invalid combination unrepresentable instead of merely rejected.
+   *
+   * Hidden fields keep their default value and are still handed to onSubmit;
+   * the caller branches on the controlling value first and ignores them.
+   */
+  showIf?: (values: Record<string, string>) => boolean;
 }
 
 /**
@@ -34,9 +44,10 @@ export function FormModal(props: {
     Object.fromEntries(props.fields.map((f) => [f.name, f.defaultValue ?? ""])),
   );
   const [error, setError] = useState<string | null>(null);
+  const visible = props.fields.filter((f) => f.showIf?.(values) ?? true);
 
   function validate(): string | null {
-    for (const f of props.fields) {
+    for (const f of visible) {
       const raw = values[f.name] ?? "";
       if (f.required && raw.trim() === "") return `${f.label} is required`;
       if (f.type === "number" && raw.trim() !== "") {
@@ -54,7 +65,7 @@ export function FormModal(props: {
       <div className="vl-modal" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>{props.title}</h3>
         {props.hint ? <p style={{ color: "#666", fontSize: ".85rem" }}>{props.hint}</p> : null}
-        {props.fields.map((f) => (
+        {visible.map((f) => (
           <label key={f.name} style={{ display: "block", fontSize: ".85rem", marginBottom: 10 }}>
             {f.label}
             {f.type === "textarea" ? (

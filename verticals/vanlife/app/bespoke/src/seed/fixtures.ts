@@ -7,6 +7,11 @@
  * whatever day the database is seeded.
  */
 import { deriveRunway, runwayUrgency, type CheckInEvent } from "../server/engine/needs.js";
+import { rateFromRange } from "../shared/levels.js";
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
 
 export interface FixtureCheckIn {
   kind: "service" | "set-level";
@@ -18,66 +23,78 @@ export interface FixtureCheckIn {
 export interface FixtureNeed {
   key: string;
   title: string;
-  unit: string;
-  capacity: number;
   direction: "depletes" | "accumulates";
   warnRatio: number;
   urgentRatio: number;
   poiCategory: string | null;
   routingDriver: boolean;
   sortOrder: number;
-  ratePerDay: number;
-  ratePerMile: number;
+  /**
+   * Drain expressed as a RANGE, the way an operator knows it, and inverted to a
+   * percent rate by rateFromRange. Writing the rate directly would be a trap:
+   * waste water sits exactly on its warn floor (runway 25.0 against a floor of
+   * 25) and laundry within 2% of its own, so a rate hand-rounded to 16.66
+   * instead of 100/6 silently flips a seeded urgency claim.
+   */
+  daysToEmpty?: number;
+  milesToEmpty?: number;
   checkIns: FixtureCheckIn[];
+}
+
+/** The stored rates a fixture's range implies — the shape the engine consumes. */
+export function fixtureRates(need: FixtureNeed): { ratePerDay: number; ratePerMile: number } {
+  return {
+    ratePerDay: rateFromRange(need.daysToEmpty),
+    ratePerMile: rateFromRange(need.milesToEmpty),
+  };
 }
 
 export const FIXTURE_NEEDS: FixtureNeed[] = [
   {
-    key: "food", title: "Food & groceries", unit: "days", capacity: 7, direction: "depletes",
+    key: "food", title: "Food & groceries", direction: "depletes",
     warnRatio: 0.25, urgentRatio: 0.1, poiCategory: "grocery", routingDriver: true, sortOrder: 1,
-    ratePerDay: 1, ratePerMile: 0,
+    daysToEmpty: 7,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 3, note: "Full grocery run before departure" }],
   },
   {
-    key: "gas", title: "Fuel", unit: "gal", capacity: 30, direction: "depletes",
+    key: "gas", title: "Fuel", direction: "depletes",
     warnRatio: 0.3, urgentRatio: 0.15, poiCategory: "fuel", routingDriver: true, sortOrder: 2,
-    ratePerDay: 0, ratePerMile: 0.067,
+    milesToEmpty: 450,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 2, note: "Topped off in Portland" }],
   },
   {
-    key: "water", title: "Fresh water", unit: "gal", capacity: 40, direction: "depletes",
+    key: "water", title: "Fresh water", direction: "depletes",
     warnRatio: 0.25, urgentRatio: 0.1, poiCategory: "water-fill", routingDriver: true, sortOrder: 3,
-    ratePerDay: 6, ratePerMile: 0,
+    daysToEmpty: 20 / 3,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 2, note: "Filled tank at home" }],
   },
   {
-    key: "electric", title: "Battery", unit: "%", capacity: 100, direction: "depletes",
+    key: "electric", title: "Battery", direction: "depletes",
     warnRatio: 0.3, urgentRatio: 0.15, poiCategory: "ev-charge", routingDriver: true, sortOrder: 4,
-    ratePerDay: 25, ratePerMile: 0,
+    daysToEmpty: 4,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 1, note: "Shore power overnight" }],
   },
   {
-    key: "laundry", title: "Laundry", unit: "loads", capacity: 3, direction: "accumulates",
+    key: "laundry", title: "Laundry", direction: "accumulates",
     warnRatio: 0.34, urgentRatio: 0.1, poiCategory: "laundry", routingDriver: true, sortOrder: 5,
-    ratePerDay: 0.25, ratePerMile: 0,
+    daysToEmpty: 12,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 8, note: "Laundromat before the trip" }],
   },
   {
-    key: "trash", title: "Trash", unit: "bags", capacity: 4, direction: "accumulates",
+    key: "trash", title: "Trash", direction: "accumulates",
     warnRatio: 0.25, urgentRatio: 0.1, poiCategory: "dump-station", routingDriver: true, sortOrder: 6,
-    ratePerDay: 0.5, ratePerMile: 0,
+    daysToEmpty: 8,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 3 }],
   },
   {
-    key: "wastewater", title: "Waste water", unit: "gal", capacity: 30, direction: "accumulates",
+    key: "wastewater", title: "Waste water", direction: "accumulates",
     warnRatio: 0.25, urgentRatio: 0.1, poiCategory: "dump-station", routingDriver: true, sortOrder: 7,
-    ratePerDay: 5, ratePerMile: 0,
+    daysToEmpty: 6,
     checkIns: [{ kind: "service", quantity: null, daysAgo: 4.5, note: "Dumped tanks" }],
   },
   {
-    key: "internet", title: "Work internet", unit: "days", capacity: 1, direction: "depletes",
+    key: "internet", title: "Work internet", direction: "depletes",
     warnRatio: 0.25, urgentRatio: 0.1, poiCategory: null, routingDriver: false, sortOrder: 8,
-    ratePerDay: 0, ratePerMile: 0,
     checkIns: [],
   },
 ];
@@ -170,13 +187,7 @@ export function fixtureNeedStatus(need: FixtureNeed): { runway: number; urgency:
     quantity: c.quantity,
     occurredAt: new Date(now - c.daysAgo * 86_400_000).toISOString(),
   }));
-  const { runway } = deriveRunway(
-    need,
-    events,
-    { ratePerDay: need.ratePerDay, ratePerMile: need.ratePerMile },
-    new Date(now).toISOString(),
-    () => 0,
-  );
+  const { runway } = deriveRunway(need, events, fixtureRates(need), new Date(now).toISOString(), () => 0);
   return { runway: Math.round(runway * 10) / 10, urgency: runwayUrgency(need, runway) };
 }
 
@@ -196,12 +207,18 @@ export function seedIntentSection(): string {
 
   for (const need of FIXTURE_NEEDS) {
     const { urgency } = fixtureNeedStatus(need);
-    const drivers =
-      need.ratePerMile > 0
-        ? `${String(need.ratePerMile)} ${need.unit}/mile`
-        : `${String(need.ratePerDay)} ${need.unit}/day`;
+    // Ranges, not rates: "450 miles" is the claim a reader can check against the
+    // van, where "0.2222 %/mile" is a number only this codebase could love.
+    const span =
+      need.milesToEmpty !== undefined
+        ? `drains from 100% to 0% in about ${String(round1(need.milesToEmpty))} miles`
+        : need.daysToEmpty === undefined
+          ? "never drains on its own"
+          : need.direction === "accumulates"
+            ? `fills from 0% to 100% in about ${String(round1(need.daysToEmpty))} days`
+            : `drains from 100% to 0% in about ${String(round1(need.daysToEmpty))} days`;
     claim(
-      `${need.title}: capacity ${String(need.capacity)} ${need.unit}, consumes about ${drivers}, currently ${urgency === "ok" ? "not flagged" : `flagged "${urgency}"`}${need.routingDriver ? "" : " — tracked as a checklist item, never generating route stops"}.`,
+      `${need.title}: ${span}, currently ${urgency === "ok" ? "not flagged" : `flagged "${urgency}"`}${need.routingDriver ? "" : " — tracked as a checklist item, never generating route stops"}.`,
     );
   }
 
