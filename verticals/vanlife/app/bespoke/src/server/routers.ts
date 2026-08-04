@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { router, TRPCError } from "@elements/lifecycle-service-runtime";
 import { protectedProcedure } from "@elements/identity-session-auth";
@@ -85,6 +86,21 @@ import {
   shouldPushWarnings,
 } from "./engine/trips.js";
 import { buildTargetViews } from "./engine/targets.js";
+import {
+  CELL_SIGNAL_SETTINGS_KEY,
+  CellSignalSettingsSchema,
+  cellSignalCredentials,
+  clearCellSignalCredentials,
+  exportFccToken,
+  exportedTokenUsername,
+  probeFccCredentials,
+  readStateJson,
+  refreshRequestPath,
+  refreshStatusPath,
+  removeFccToken,
+  watcherPath,
+  writeStateJson,
+} from "./engine/cellSignal.js";
 import {
   composeDigest,
   DIGEST_SETTINGS_KEY,
@@ -1141,7 +1157,94 @@ export const digestRouter = router({
   ),
 });
 
+/**
+ * FCC credentials and the button that asks the van server to rebuild the
+ * coverage overlay.
+ *
+ * The work itself happens on the host — this container has no Docker socket
+ * and the pipeline is PowerShell — so nothing here starts anything. It writes
+ * a request onto the shared volume and reports back exactly what the host has
+ * written about it, including the case where nothing has written anything at
+ * all. See engine/cellSignal.ts for why the channel is files.
+ */
+export const cellSignalRouter = router({
+  status: op.query(async ({ ctx }) => {
+    const creds = await cellSignalCredentials(ctx.dbHandle.db);
+    const exported = exportedTokenUsername();
+    const request = readStateJson(refreshRequestPath()) as { requestId?: unknown } | null;
+    const requestId = typeof request?.requestId === "string" ? request.requestId : null;
+    return {
+      hasCredentials: creds !== null,
+      // Echoed back because the operator typed it and can check it, the same
+      // way ntfy shows its topic. The token never leaves the server.
+      username: creds?.username ?? null,
+      hasToken: creds !== null,
+      // Whether the file on the volume is the one for the stored account, read
+      // fresh rather than remembered: `docker compose down -v` wipes the volume
+      // and leaves the database row behind.
+      tokenExported: exported !== null && exported === creds?.username,
+      pendingRequestId: requestId,
+      run: readStateJson(refreshStatusPath()),
+      watcher: readStateJson(watcherPath()),
+      // Every timestamp in run/watcher is written by the van server, so the
+      // comparison has to be against the van server's clock and not the
+      // browser's — which may be a phone in a different time zone with a bad one.
+      now: nowIso(),
+    };
+  }),
+
+  saveCredentials: op
+    .input(z.object({ username: z.string().min(1).max(200), token: z.string().min(1).max(500) }))
+    .mutation(
+      intakeWrite(async ({ db, input, ctx }) => {
+        await setSetting(db, CELL_SIGNAL_SETTINGS_KEY, CellSignalSettingsSchema, input, String(ctx.user.id));
+        // Inside the transaction deliberately. If the volume cannot be written
+        // the operator has not configured anything the refresh can use, and a
+        // stored row that the host can never read is worse than a visible
+        // failure — it fails later, at 03:30, in a scheduled task.
+        exportFccToken(input, nowIso());
+        return { username: input.username };
+      }),
+    ),
+
+  clearCredentials: op.mutation(
+    intakeWrite(async ({ db }) => {
+      await clearCellSignalCredentials(db);
+      // Throws if it cannot: a token left on the volume after the operator
+      // asked for it to be gone is the entire risk here.
+      removeFccToken();
+      return { cleared: true as const };
+    }),
+  ),
+
+  testCredentials: op.mutation(async ({ ctx }) => probeFccCredentials(ctx.dbHandle.db)),
+
+  requestRefresh: op
+    .input(z.object({ force: z.boolean().default(false) }).default({ force: false }))
+    .mutation(async ({ ctx, input }) => {
+      // No intakeWrite: this writes no rows. Same shape as poiSources.refreshNow,
+      // which reports refusal as a result rather than as an error.
+      const db = ctx.dbHandle.db;
+      const creds = await cellSignalCredentials(db);
+      if (creds === null) return { requested: false as const, reason: "no credentials stored" };
+      if (exportedTokenUsername() !== creds.username) {
+        return { requested: false as const, reason: "the token file is missing from the data volume" };
+      }
+      const requestedAt = nowIso();
+      const requestId = `${requestedAt}-${randomUUID().slice(0, 8)}`;
+      writeStateJson(refreshRequestPath(), {
+        schema: 1,
+        requestId,
+        requestedAt,
+        requestedBy: String(ctx.user.id),
+        force: input.force,
+      });
+      return { requested: true as const, requestId };
+    }),
+});
+
 export const sourcesRouter = router({
   poiSources: createPoiSourcesStatusRouter({ sources: ["overpass", "nps", "recgov", "opencharge"] }),
   ntfy: createNtfyStatusRouter(),
+  cellSignal: cellSignalRouter,
 });

@@ -2,9 +2,35 @@
 
 `Dockerfile` and `compose.yaml` are generated from the assembly manifest — never edit them.
 This file, `prepare-data.ps1`, `refresh-cell-signal.ps1`,
-`install-cell-signal-schedule.ps1`, `build-cell-signal.ts`, `cell-signal-tiers.ts`,
-`prepare-legal-overlay.ps1`, `build-forest-buffers.ts`, `forest-camping-distance.json`, and
-the repository-root `.dockerignore` are authored and survive regeneration.
+`install-cell-signal-schedule.ps1`, `watch-cell-signal.ps1`, `build-cell-signal.ts`,
+`cell-signal-tiers.ts`, `prepare-legal-overlay.ps1`, `build-forest-buffers.ts`,
+`forest-camping-distance.json`, and the repository-root `.dockerignore` are authored and
+survive regeneration.
+
+## Volume names
+
+`vanlife-tiles` and `vanlife-osrm` are declared `external:` and keep those literal names.
+The data volume is **`vanlife_vanlife-data`** — Compose prefixes it with the project name
+because it is *not* external. Every script that mounts it must use the prefixed name and
+`docker volume inspect` before mounting, because `docker run -v <name>` **creates** a volume
+that does not exist rather than failing: a typo here does not error, it silently reads an
+empty directory forever.
+
+Note also that `docker compose down -v` wipes this volume, and with it the saved FCC
+credentials, the pending refresh request and the run status. That is coherent — the app's
+settings live in the database on the same volume, so they go together — but it means the
+credentials must be re-entered in Settings after a reset.
+
+## A note on em dashes in these scripts
+
+Keep them out of string literals. These files have no BOM, and Windows PowerShell 5.1 —
+which is what `powershell.exe` is, and what the scheduled tasks run — reads them as ANSI,
+where an em dash's UTF-8 bytes end in `0x94`: a curly quote that closes the string and
+breaks the parse. In comments they are harmless. Check with:
+
+```
+[System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$errs)
+```
 
 The build context is the repository root (`compose.yaml` → `build.context: ../../..`), so
 the root `.dockerignore` is load-bearing: without it every build ships the local scratch
@@ -42,18 +68,77 @@ known to be optimistic. The legend says so on screen for the same reason.
 
 1. Register for an FCC User Registration account and mint an API token at
    <https://broadbandmap.fcc.gov/login>.
-2. Save it at the repository root as `.fcc-token` (gitignored):
-   ```json
-   { "username": "you@example.com", "token": "..." }
-   ```
-3. Build the first archive by hand — it takes a while, and you want to watch the first one:
-   ```
-   pwsh -File verticals/vanlife/deploy/refresh-cell-signal.ps1 -Force
-   ```
-4. Register the schedule so it keeps itself current:
+2. Enter it in the app under **Settings → Cell coverage → Set FCC credentials**, then press
+   **Test credentials**. The app stores them and writes them to
+   `/data/cell-signal/fcc-token.json` on the data volume, which is where the refresh reads
+   them from.
+3. Register the schedule and the host agent:
    ```
    pwsh -File verticals/vanlife/deploy/install-cell-signal-schedule.ps1
    ```
+4. Build the first archive by hand — it takes a while, and you want to watch the first one:
+   ```
+   pwsh -File verticals/vanlife/deploy/refresh-cell-signal.ps1 -Force
+   ```
+   Or press **Refresh now** in Settings, which asks the host agent to do exactly this.
+
+Credential precedence in `refresh-cell-signal.ps1` is: an explicitly-passed `-TokenFile`
+wins (you named a file, you meant it), then the app's copy on the data volume, then the
+repo-root `.fcc-token`. That last one still works and is what you want before the app is
+even up:
+
+```json
+{ "username": "you@example.com", "token": "..." }
+```
+
+The token is never written to host disk by the refresh — it is base64'd out of the volume
+straight into memory, because a temp file holding an API token has no reliable cleanup
+(Task Scheduler kills a run at its time limit without running `finally`, and so does a
+reboot).
+
+### The host agent
+
+The app cannot run the refresh. Its container has no Docker socket and no view of this
+repo, and the pipeline is PowerShell driving GDAL and tippecanoe. So "Refresh now" writes a
+request onto the data volume and `watch-cell-signal.ps1` — registered as a second scheduled
+task, polling every 5 minutes — picks it up and runs `refresh-cell-signal.ps1`.
+
+Four files in `/data/cell-signal` on `vanlife_vanlife-data`:
+
+| File | Direction | What it carries |
+| --- | --- | --- |
+| `fcc-token.json` | app → host | `{username, token, savedAt}` |
+| `request.json` | app → host | `{requestId, requestedAt, requestedBy, force}` |
+| `status.json` | host → app | `{requestId, state, startedAt, heartbeatAt, finishedAt, exitCode, error, step}` |
+| `watcher.json` | host → app | `{aliveAt, pollSeconds, busy, lastPollError}` |
+
+`watcher.json` is rewritten on **every** poll, including idle ones. That is what lets the
+app tell "the agent was never installed" apart from "the agent died on Tuesday" — different
+causes, different fixes. An agent that only announced itself while working would be
+indistinguishable from one that is absent.
+
+Nobody deletes `request.json`; the app overwrites it with a fresh `requestId` and the host
+claims it by echoing that id into `status.json`. Deleting the request is the classic race in
+this pattern.
+
+**Both tasks run only while this machine is signed in.** The principal is Interactive
+because Docker Desktop generally is not running when nobody is logged on, so an S4U task
+would fail every time. For a van server, enable auto sign-in and leave it at a locked
+screen — a locked session is still signed in.
+
+The agent cannot report a Docker outage, because the channel *is* Docker. The app therefore
+says "no host agent has responded" and never "the watcher is not installed". A result
+produced while Docker was down is held in `.data-src/cell-signal/pending-status.json` and
+flushed on a later poll rather than lost.
+
+```
+Start-ScheduledTask   -TaskName 'Dilly-Dally cell signal watcher'
+Get-ScheduledTaskInfo -TaskName 'Dilly-Dally cell signal watcher'
+pwsh -File verticals/vanlife/deploy/watch-cell-signal.ps1 -Once -Verbose
+```
+
+That last line is the real path, not a debug one: `-Once` is exactly what the task runs.
+Per-run logs are under `.data-src/cell-signal/runs/`.
 
 ### How it stays current
 
@@ -84,6 +169,13 @@ Start-ScheduledTask   -TaskName 'Dilly-Dally cell signal refresh'
 Get-ScheduledTaskInfo -TaskName 'Dilly-Dally cell signal refresh'
 ```
 
+There are now two status sources, and they answer different questions.
+`cell-signal.json` on the **tiles** volume answers *how old is the data* — it is what the
+Status page card reads. `status.json` on the **data** volume answers *what happened to the
+button I just pressed*, and is what Settings reads. They can legitimately disagree: an
+interrupted run never reaches the point of updating the tiles manifest, and a successful run
+that found nothing new leaves `asOfDate` exactly where it was.
+
 ### Before the first unattended run
 
 Three things could not be confirmed while this was written and should be checked once
@@ -98,6 +190,19 @@ against real data — each is flagged in the code at the point it matters:
   numeric IDs, which move with corporate restructuring. Anything unmatched is reported with
   counts on the first run — put the leftovers in `cell-signal-providers.json` as
   `{"<name or id>": "att"}` and re-run.
+
+The host agent adds four more, none of which can be exercised from the test suite:
+
+- **`Start-Process -PassThru` exit codes.** The handle is cached immediately
+  (`$null = $proc.Handle`) because otherwise `ExitCode` can come back null.
+- **Whether `$trigger.Repetition` survives `Register-ScheduledTask`** under a Limited
+  principal — check with `Get-ScheduledTask` after the first install that the watcher really
+  repeats.
+- **Whether `docker.exe` is on PATH** for a `-NonInteractive` scheduled task even with the
+  prepend both scripts now do.
+- **Whether `-ExecutionTimeLimit` kills the process tree or only the watcher.** Only the
+  watcher would orphan a running refresh, which is why the agent detects an orphan on start
+  and reports `interrupted` rather than starting a second build.
 ## Legal camping overlay (optional)
 
 A second PMTiles archive on the same `vanlife-tiles` volume, shading where dispersed

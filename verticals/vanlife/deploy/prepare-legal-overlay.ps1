@@ -94,7 +94,7 @@ docker @gdal ogr2ogr -f GPKG /w/out/usfs_open_5070.gpkg /w/Trans_MVUM_Road.gdb T
   -t_srs EPSG:5070 -nlt MULTILINESTRING
 if ($LASTEXITCODE -ne 0) { throw "USFS filter/reproject failed" }
 
-Write-Host "== USFS: buffer and dissolve per forest (slow — GEOS over ~110k segments) =="
+Write-Host "== USFS: buffer and dissolve per forest (slow - GEOS over ~110k segments) =="
 docker @gdal ogr2ogr -f GPKG /w/out/usfs_corridor_5070.gpkg /w/out/usfs_open_5070.gpkg `
   -dialect SQLITE -sql "@/w/out/usfs-corridors.sql" `
   -nln usfs_legal_corridor -nlt MULTIPOLYGON -lco GEOMETRY_NAME=geometry -overwrite
@@ -131,7 +131,7 @@ docker @gdal ogr2ogr -f GPKG -update -append /w/out/legal_combined.gpkg /w/out/u
   -clipdst $West $South $East $North -simplify 0.0002 -makevalid -nlt MULTIPOLYGON
 if ($LASTEXITCODE -ne 0) { throw "USFS combine failed" }
 
-Write-Host "== Tile to PMTiles (slowest step — roughly 2.5 hours) =="
+Write-Host "== Tile to PMTiles (slowest step - roughly 2.5 hours) =="
 # GDAL writes PMTiles directly, so there is no MBTiles step and no pmtiles binary
 # on the host. z12 is the floor at which a 300 ft corridor is still a few pixels
 # wide; MapLibre overzooms past it rather than blanking.

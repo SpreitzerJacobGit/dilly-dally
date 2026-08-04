@@ -91,12 +91,20 @@ export function cellSignalArchive(status: TilesStatus | null, loaded: boolean): 
   };
 }
 
-export function useCellSignalArchive(): CellSignalArchive {
+/**
+ * The raw tile status, with a way to ask again.
+ *
+ * Asked once on mount. The archive is replaced at most a couple of times a
+ * year by a scheduled task, so polling it would be all cost and no news — but
+ * the Settings page can trigger a rebuild, and after that the operator has a
+ * specific reason to expect an answer to have changed. Hence reload() rather
+ * than an interval.
+ */
+export function useTilesStatus(): { status: TilesStatus | null; loaded: boolean; reload: () => void } {
   const [status, setStatus] = useState<TilesStatus | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [nonce, setNonce] = useState(0);
 
-  // Asked once. The archive is replaced at most a couple of times a year by a
-  // scheduled task, so polling it would be all cost and no news.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -114,7 +122,12 @@ export function useCellSignalArchive(): CellSignalArchive {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [nonce]);
 
+  return { status, loaded, reload: () => setNonce((n) => n + 1) };
+}
+
+export function useCellSignalArchive(): CellSignalArchive {
+  const { status, loaded } = useTilesStatus();
   return cellSignalArchive(status, loaded);
 }
