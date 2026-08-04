@@ -13,7 +13,9 @@ export const tripCreateSchema = z.object({
   origin: latLngSchema,
   destName: z.string().min(1).max(120),
   dest: latLngSchema,
-  dailyDriveHours: z.number().min(1).max(12).default(4),
+  // Optional, not defaulted: the server has to be able to tell "not supplied"
+  // apart from "4", or the operator's default in Settings could never apply.
+  dailyDriveHours: z.number().min(1).max(12).optional(),
   deviationBudgetRatio: z.number().min(1).max(4).default(2),
   startDate: z.iso.date().optional(),
 });

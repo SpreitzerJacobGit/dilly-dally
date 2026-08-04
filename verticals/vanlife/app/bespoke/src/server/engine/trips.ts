@@ -7,8 +7,9 @@
  * baseline, what a delete is actually allowed to remove, and which trip may
  * push notifications at the operators.
  */
+import { z } from "zod";
 import { and, eq, like } from "@elements/storage-sqlite-drizzle";
-import { appSettings } from "@elements/lifecycle-app-settings";
+import { appSettings, getSetting } from "@elements/lifecycle-app-settings";
 import {
   daySelections,
   digests,
@@ -36,6 +37,24 @@ const nowIso = (): string => new Date().toISOString();
  */
 export function shouldPushWarnings(trip: { status: string }): boolean {
   return trip.status === "active";
+}
+
+/**
+ * Operator-set planning defaults.
+ *
+ * Only what a new trip should start at — the pace a trip actually runs at lives
+ * on the trip, and today's pace lives on the day (see engine/candidates.ts).
+ * Changing this never reaches a trip that already exists.
+ */
+export const PLANNING_SETTINGS_KEY = "planning";
+export const PlanningSettingsSchema = z.object({
+  defaultDailyDriveHours: z.number().min(1).max(12).default(4),
+});
+export const DEFAULT_DAILY_DRIVE_HOURS = 4;
+
+export async function planningSettings(db: Db): Promise<{ defaultDailyDriveHours: number }> {
+  const rec = await getSetting(db, PLANNING_SETTINGS_KEY, PlanningSettingsSchema);
+  return { defaultDailyDriveHours: rec?.value.defaultDailyDriveHours ?? DEFAULT_DAILY_DRIVE_HOURS };
 }
 
 export interface TripUpdateInput {
@@ -221,11 +240,15 @@ export async function deleteTrip(db: Db, id: number): Promise<TripDeleteResult> 
   };
 }
 
-/** The `plan-fingerprint:<tripId>:<date>` rows no foreign key reaches. */
+/** The per-trip-and-date settings rows no foreign key reaches. */
 async function clearPlanFingerprints(db: Db, tripId: number): Promise<number> {
-  const removed = await db
-    .delete(appSettings)
-    .where(like(appSettings.key, `plan-fingerprint:${String(tripId)}:%`))
-    .returning({ key: appSettings.key });
-  return removed.length;
+  let removed = 0;
+  for (const prefix of ["plan-fingerprint", "drive-hours"]) {
+    const gone = await db
+      .delete(appSettings)
+      .where(like(appSettings.key, `${prefix}:${String(tripId)}:%`))
+      .returning({ key: appSettings.key });
+    removed += gone.length;
+  }
+  return removed;
 }

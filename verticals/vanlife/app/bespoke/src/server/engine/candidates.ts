@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { and, asc, count, desc, eq, inArray, type Db } from "@elements/storage-sqlite-drizzle";
-import { getSetting, setSetting } from "@elements/lifecycle-app-settings";
+import { deleteSetting, getSetting, setSetting } from "@elements/lifecycle-app-settings";
 import {
   checkIns,
   daySelections,
@@ -221,6 +221,51 @@ export async function budgetUsage(db: Db, trip: TripRow) {
     spentMinutes: Math.round(spentMinutes),
     remainingMinutes: budgetMinutes === null ? null : Math.round(budgetMinutes - spentMinutes),
   };
+}
+
+/**
+ * How many hours we intend to drive on one particular day.
+ *
+ * The trip's `dailyDriveHours` is the pace; this is the override for a single
+ * date, because "today I feel like driving eight hours" is a statement about
+ * today and not a change of plan. It is stored per trip and date rather than on
+ * the trip so tomorrow reverts on its own, and it is deliberately read by the
+ * day-leg builder ONLY — Target ETAs stay paced off the trip value, or one long
+ * day would silently re-label every horizon down the line.
+ */
+export const DriveHoursSchema = z.object({ hours: z.number().min(1).max(12) });
+
+const driveHoursKey = (tripId: number, planDate: string): string =>
+  `drive-hours:${String(tripId)}:${planDate}`;
+
+export interface DayDriveHours {
+  /** What the day-leg builder should actually use. */
+  effective: number;
+  /** The override, or null when the day is running at the trip's pace. */
+  override: number | null;
+  tripHours: number;
+}
+
+export async function dayDriveHours(db: Db, trip: TripRow, planDate: string): Promise<DayDriveHours> {
+  const rec = await getSetting(db, driveHoursKey(trip.id, planDate), DriveHoursSchema);
+  const override = rec?.value.hours ?? null;
+  return { effective: override ?? trip.dailyDriveHours, override, tripHours: trip.dailyDriveHours };
+}
+
+/** Set the day's override, or clear it with null to fall back to the trip's pace. */
+export async function setDayDriveHours(
+  db: Db,
+  tripId: number,
+  planDate: string,
+  hours: number | null,
+  updatedBy: string | null = null,
+): Promise<void> {
+  const key = driveHoursKey(tripId, planDate);
+  if (hours === null) {
+    await deleteSetting(db, key);
+    return;
+  }
+  await setSetting(db, key, DriveHoursSchema, { hours }, updatedBy);
 }
 
 interface BuildContext {
@@ -671,7 +716,11 @@ export async function buildDailyCandidates(
   nowIso: string,
 ): Promise<BuiltCandidate[]> {
   const quantized = hourQuantized(nowIso);
-  const ctx = await loadContext(db, trip, quantized);
+  // The day's override, if one is set, is the pace for this build alone — every
+  // caller (today, replan, the digest) comes through here, so this is the only
+  // place it has to be applied.
+  const pace = await dayDriveHours(db, trip, planDateOf(nowIso));
+  const ctx = await loadContext(db, { ...trip, dailyDriveHours: pace.effective }, quantized);
   const skeleton = await osrmRoute([ctx.position, { lat: ctx.steer.lat, lng: ctx.steer.lng }], {
     overview: "full",
   });
@@ -718,7 +767,11 @@ const fingerprintKey = (tripId: number, planDate: string): string =>
  * A replan whose current fingerprint matches the persisted build's must serve
  * that build untouched; wall time alone never reshuffles the candidates.
  */
-export async function planStateFingerprint(db: Db, tripId: number): Promise<string> {
+export async function planStateFingerprint(
+  db: Db,
+  tripId: number,
+  planDate?: string,
+): Promise<string> {
   const trip = (await db.select().from(trips).where(eq(trips.id, tripId)))[0];
   const wps = await db
     .select()
@@ -758,6 +811,14 @@ export async function planStateFingerprint(db: Db, tripId: number): Promise<stri
     await db.select({ updatedAt: pois.updatedAt }).from(pois).orderBy(desc(pois.updatedAt)).limit(1)
   )[0];
   const poiCount = (await db.select({ n: count() }).from(pois))[0];
+  // The day's drive-hours override is an input to the build but lives outside
+  // the trip row, so it has to reach the hash by hand — otherwise setting it
+  // would leave the fingerprint unmoved and replan would keep serving the plan
+  // built at the old pace.
+  const dayOverride =
+    planDate === undefined
+      ? null
+      : ((await getSetting(db, driveHoursKey(tripId, planDate), DriveHoursSchema))?.value.hours ?? null);
 
   const state = {
     // The fingerprint hashes state, not code — so a deployed engine change
@@ -766,6 +827,7 @@ export async function planStateFingerprint(db: Db, tripId: number): Promise<stri
     // constant is still constant, so ROUTE-5 determinism is untouched.
     engine: ENGINE_REVISION,
     trip: trip ? { ...trip, createdAt: undefined, updatedAt: undefined } : null,
+    dayDriveHours: dayOverride,
     // The spread is load-bearing: every anchor column — radius, parent, depth,
     // order, pin — must reach the hash so editing an anchor actually replans.
     // It is also why auto-resolution is never written back to this row; that
@@ -856,7 +918,7 @@ export async function persistCandidates(
     db,
     fingerprintKey(tripId, planDate),
     PlanFingerprintSchema,
-    { hash: await planStateFingerprint(db, tripId) },
+    { hash: await planStateFingerprint(db, tripId, planDate) },
     null,
   );
 }
