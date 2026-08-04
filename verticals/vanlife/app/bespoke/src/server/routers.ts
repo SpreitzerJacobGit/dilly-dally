@@ -42,6 +42,7 @@ import {
   type StayKind,
 } from "./engine/stays.js";
 import { availabilityHealth } from "./engine/stayAvailability.js";
+import { hexArtifactStatuses } from "./engine/hexLookup.js";
 import {
   targetAddSchema,
   targetPinSchema,
@@ -1413,4 +1414,12 @@ export const staysRouter = router({
 
   /** Availability is live data in an offline-first app; it reports its own state. */
   availabilityHealth: op.query(async ({ ctx }) => availabilityHealth(ctx.dbHandle.db)),
+
+  /**
+   * The two optional lookup artifacts the stay scorer reads. Reported because
+   * their absence silently changes how stays are scored — legality and signal
+   * fall back to saying nothing — and an installation should be able to see
+   * that rather than wonder why dispersed sites never win.
+   */
+  overlayLookups: op.query(() => hexArtifactStatuses()),
 });

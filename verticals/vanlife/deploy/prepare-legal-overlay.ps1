@@ -142,16 +142,31 @@ docker @gdal ogr2ogr -f PMTiles /w/out/legal-camping.pmtiles /w/out/legal_combin
   -dsco "DESCRIPTION=Dispersed camping: BLM open land and USFS MVUM road corridors"
 if ($LASTEXITCODE -ne 0) { throw "PMTiles write failed" }
 
+Write-Host "== Server-side lookup (H3 res 7) =="
+# The tiles are for looking at. This is the same polygons on the coverage
+# overlay's hex grid, so the stay scorer can score a dispersed site on legality
+# — until this exists the overlay is write-only to the map, and the planner has
+# no idea whether the spot it picked is on BLM land.
+docker @gdal ogr2ogr -f GeoJSON /w/out/legal_combined.geojson /w/out/legal_combined.gpkg
+if ($LASTEXITCODE -ne 0) { throw "GeoJSON export for the hex lookup failed" }
+node --experimental-strip-types (Join-Path $PSScriptRoot "build-legal-cells.ts") `
+  --in (Join-Path $out "legal_combined.geojson") `
+  --out (Join-Path $out "legal-land-cells.json") `
+  --res 7 --as-of (Get-Date -Format "yyyy-MM-dd")
+if ($LASTEXITCODE -ne 0) { throw "hex lookup build failed" }
+
 Write-Host "== Install onto vanlife-tiles =="
 docker run --rm -v vanlife-tiles:/tiles -v "${out}:/host:ro" alpine sh -c @'
 cp /host/legal-camping.pmtiles /tiles/ &&
-cp /host/legal-camping.json /tiles/
+cp /host/legal-camping.json /tiles/ &&
+cp /host/legal-land-cells.json /tiles/
 '@
 if ($LASTEXITCODE -ne 0) { throw "install onto volume failed" }
 
 if (-not $KeepIntermediates) {
   Remove-Item (Join-Path $out "usfs_open_5070.gpkg"), (Join-Path $out "usfs_corridor_5070.gpkg"),
-              (Join-Path $out "blm_4326.gpkg"), (Join-Path $out "legal_combined.gpkg") -ErrorAction SilentlyContinue
+              (Join-Path $out "blm_4326.gpkg"), (Join-Path $out "legal_combined.gpkg"),
+              (Join-Path $out "legal_combined.geojson") -ErrorAction SilentlyContinue
 }
 
 $mb = [math]::Round((Get-Item (Join-Path $out "legal-camping.pmtiles")).Length / 1MB, 1)

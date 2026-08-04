@@ -104,6 +104,10 @@ wiring:
   - { from: poi, to: jobs, surface: jobs.status }
   - { from: poi, to: settings, surface: settings.store }
   - { from: bespoke/routes, to: storage, surface: storage.db }
+  - { from: bespoke/stays, to: storage, surface: storage.db }
+  - { from: bespoke/stays, to: identity, surface: authz.protectedProcedure }
+  - { from: bespoke/stays, to: jobs, surface: jobs.status }
+  - { from: bespoke/stays, to: settings, surface: settings.store }
   - { from: bespoke/map-dashboard, to: map, surface: map.basemapStyle }
   - { from: bespoke/digest, to: notify, surface: notify.publishOnce }
   - { from: bespoke/digest, to: jobs, surface: jobs.status }
@@ -116,6 +120,10 @@ bespoke:
     - { id: checkins, title: Check-ins, requirementsSection: "#checkins" }
     - { id: poi, title: POI aggregation, requirementsSection: "#poi" }
     - { id: routes, title: Route candidates, requirementsSection: "#routes" }
+    # Tables of its own (stay_sites, stay_availability, stay_options,
+    # stay_weights, stay_plans) plus the server-side hex lookup that finally
+    # makes the legal and coverage overlays readable by the planner.
+    - { id: stays, title: Where we stay the night, requirementsSection: "#stays" }
     - { id: map-dashboard, title: Map dashboard, requirementsSection: "#map" }
     # No element and no tables of its own: the overlay is a second PMTiles
     # archive on the tiles volume, built out of band by deploy/prepare-legal-overlay.ps1

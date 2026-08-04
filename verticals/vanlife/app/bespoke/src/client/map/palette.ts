@@ -21,8 +21,21 @@ export const ROLE_LABELS: Record<string, string> = {
 
 export const PROJECTED_COLOR = "#9ca3af";
 
+/**
+ * The four kinds of place the night can be spent in.
+ *
+ * Kept as one green-through-slate family rather than four unrelated hues,
+ * because on the map they answer the same question — "could we sleep here?" —
+ * and only differ in what kind of night it would be. Campground keeps the green
+ * it has always had; dispersed sits beside it in a deeper, less civic green;
+ * lodging takes indigo, and overnight parking the most muted of the four, which
+ * is also the honest ranking of how much anyone wants to end up in one.
+ */
 export const CATEGORY_COLORS: Record<string, string> = {
   campground: "#16a34a",
+  dispersed: "#047857",
+  lodging: "#4f46e5",
+  parking: "#57534e",
   "water-fill": "#0ea5e9",
   "dump-station": "#78716c",
   laundry: "#8b5cf6",
@@ -46,6 +59,9 @@ export const CATEGORY_COLORS: Record<string, string> = {
  */
 export const CATEGORY_LABELS: Record<string, string> = {
   campground: "Campground",
+  dispersed: "Dispersed camping",
+  lodging: "Hotel / motel",
+  parking: "Overnight parking",
   "water-fill": "Water fill",
   "dump-station": "Dump station",
   laundry: "Laundry",
@@ -169,6 +185,28 @@ export function categoryColor(category: string): string {
 
 export function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
+}
+
+/** The kinds of stay, in the order the weight sliders present them. */
+export const STAY_KIND_ORDER: string[] = ["campground", "dispersed", "lodging", "parking"];
+
+/**
+ * What the weight sliders are called on screen. The factor keys are the
+ * engine's; these are the words two people would actually use about a night.
+ */
+export const STAY_FACTOR_LABELS: Record<string, string> = {
+  needs: "Clears what's running low",
+  proximity: "Stays close to the route",
+  signal: "Has cell signal for work",
+  legality: "Known to be legal",
+  cost: "Cheap",
+  sights: "Near something worth seeing",
+  freshness: "Recently reported",
+};
+
+export function stayWeightLabel(factor: string): string {
+  if (factor.startsWith("kind-")) return categoryLabel(factor.slice(5));
+  return STAY_FACTOR_LABELS[factor] ?? factor;
 }
 
 export function signalColor(tier: number): string {

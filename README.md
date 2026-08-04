@@ -30,6 +30,14 @@ most of the design:
 - **Levels are honest estimates, never measurements.** A level is always labeled as an
   estimate, derived from the last check-in plus configured rate plus elapsed time and recorded
   miles. Nothing edits a level number directly — levels change only through check-ins.
+- **The day ends where the night is spent.** A leg's endpoint is a real place chosen from
+  four kinds — campground, dispersed site, hotel, overnight parking — ranked against the
+  needs that are actually running down. What a stay costs is measured against carrying on
+  toward tomorrow rather than as a there-and-back detour, because tomorrow starts from
+  wherever you slept. Three things rule a place out rather than merely scoring it down: a
+  road the van can't drive, more detour than the cap allows, and arriving after dark
+  somewhere unlit. When nothing survives, the leg says so and names its endpoint as the
+  reach of the day's drive — never as a place.
 - **A level is a percentage, not a quantity.** Every tracked consumable runs 0 to 100
   whether it holds water, fuel or trash, because a percentage is what you can read off a
   gauge without converting. Drain rates are entered as the range a full tank lasts — 450

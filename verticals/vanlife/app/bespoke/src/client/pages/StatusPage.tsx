@@ -8,6 +8,7 @@ import { StatCard, DashboardGrid } from "@elements/output-dashboard-cards";
 import { DataTable } from "@elements/shell-crud-tables";
 import type { PageUser } from "../index.js";
 import { readCellSignalManifest } from "../lib/cellSignal.js";
+import { trpc } from "../trpc.js";
 import { VL_STYLES } from "../styles.js";
 
 interface HealthInfo {
@@ -107,6 +108,10 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
   const [diag, setDiag] = useState<DiagInfo | null>(null);
   const [tiles, setTiles] = useState<TilesInfo | null>(null);
   const [legal, setLegal] = useState<LegalProvenance | null>(null);
+  // These live on the server's own disk rather than under /tiles/status: the
+  // lookup tables are far past that endpoint's 64 KB manifest ceiling, and it
+  // is the server, not the browser, that has to read them.
+  const lookupsQ = trpc.stays.overlayLookups.useQuery();
 
   const load = useCallback(async () => {
     setHealth(await fetchJson<HealthInfo>("/healthz"));
@@ -171,6 +176,25 @@ export function StatusPage(_props: { user: PageUser }): JSX.Element {
           tone={coverage.tone}
           detail={coverage.detail || undefined}
         />
+        {/* The overlays are drawn from the tile archives; these are the same data
+            as lookup tables the stay scorer can actually read. Not "alert" when
+            absent, for the same reason the overlay card isn't — but worth saying,
+            because without them legality and signal stop influencing which place
+            we sleep at, and say nothing rather than guessing. */}
+        {(lookupsQ.data ?? []).map((a) => (
+          <StatCard
+            key={a.file}
+            label={a.file === "legal-land-cells.json" ? "Legality lookup (scoring)" : "Signal lookup (scoring)"}
+            value={a.installed ? "Present" : a.error ? "Unreadable" : "Not installed"}
+            tone={a.installed ? "good" : a.error ? "alert" : undefined}
+            detail={
+              a.error ??
+              (a.installed
+                ? `${String(a.cells ?? 0)} hexes${a.asOf ? ` · as of ${a.asOf}` : ""}`
+                : "not built — this factor says nothing rather than guessing")
+            }
+          />
+        ))}
         <StatCard
           label="Uptime"
           value={diag?.uptimeSeconds !== undefined ? `${String(Math.floor(diag.uptimeSeconds / 3600))}h ${String(Math.floor((diag.uptimeSeconds % 3600) / 60))}m` : "—"}
