@@ -124,6 +124,14 @@ export interface MapViewProps {
    * scheduled refresh is not masked by the browser's cache of the old one.
    */
   signalVersion?: string;
+  /**
+   * Legal-camping land layers switched off, keyed like LAND_COLORS.
+   *
+   * The overlay only draws at all when its archive is present on the tile
+   * volume; an absent archive is reported on the Status page rather than
+   * silently leaving the map unshaded.
+   */
+  hiddenLandLayers?: Set<string>;
   onSelectRoute: (id: number) => void;
   onStopClick: (routeId: number, orderIndex: number) => void;
   onPoiClick: (id: number) => void;

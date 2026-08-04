@@ -42,6 +42,9 @@ export interface PlannerMapProps {
   signalAsOf: string | null;
   onToggleSignal: (on: boolean) => void;
   onSignalCarrier: (carrier: string) => void;
+  /** Legal-camping land layers switched off in the legend. */
+  hiddenLandLayers: Set<string>;
+  onToggleLandLayer: (layer: string) => void;
   position: { lat: number; lng: number } | null;
   origin: MapOriginView | null;
   targets: MapTargetView[];
@@ -83,6 +86,7 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         showSignal={props.showSignal}
         signalCarrier={props.signalCarrier}
         signalVersion={props.signalVersion}
+        hiddenLandLayers={props.hiddenLandLayers}
         position={props.position}
         origin={props.origin}
         targets={props.targets}
@@ -112,6 +116,8 @@ export function PlannerMap(props: PlannerMapProps): JSX.Element {
         signalAsOf={props.signalAsOf}
         onToggleSignal={props.onToggleSignal}
         onSignalCarrier={props.onSignalCarrier}
+        hiddenLand={props.hiddenLandLayers}
+        onToggleLand={props.onToggleLandLayer}
       />
 
       {props.detail}

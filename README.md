@@ -124,6 +124,15 @@ basemap builds. Routing by [OSRM](https://project-osrm.org/). Place data comes f
 sources and is attributed per record with a link out — the app never rehosts another
 service's content.
 
+The optional legal-camping overlay is built from two public federal datasets — the USFS
+[Motor Vehicle Use Map roads](https://data.fs.usda.gov/geodata/edw/datasets.php) and the BLM
+[Surface Management Agency polygons](https://gbp-blm-egis.hub.arcgis.com/) — processed
+offline into a local tile archive. It is **advisory**: the corridor width is a published
+distance only for the handful of forests listed in
+`verticals/vanlife/deploy/forest-camping-distance.json` and a conservative assumption
+everywhere else, which the map draws as an estimate. Unshaded land means "unverified", not
+"illegal".
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

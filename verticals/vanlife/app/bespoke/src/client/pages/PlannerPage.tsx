@@ -14,9 +14,11 @@ import type { TargetTreeNode, DropZone } from "../components/TargetTree.js";
 import { enqueue, flushQueue, newClientId } from "../lib/checkinQueue.js";
 import { readGrantedFix } from "../lib/geocode.js";
 import {
+  readHiddenLandLayers,
   readHiddenPoiCategories,
   readSignalCarrier,
   readSignalOverlay,
+  writeHiddenLandLayers,
   writeHiddenPoiCategories,
   writeSignalCarrier,
   writeSignalOverlay,
@@ -92,6 +94,7 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     return stored !== null && isSignalCarrier(stored) ? stored : DEFAULT_SIGNAL_CARRIER;
   });
   const signalArchive = useCellSignalArchive();
+  const [hiddenLandLayers, setHiddenLandLayers] = useState<Set<string>>(readHiddenLandLayers);
   const [pendingPoiId, setPendingPoiId] = useState<number | null>(null);
   const [modal, setModal] = useState<
     | null
@@ -470,6 +473,13 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
     setSignalCarrier(carrier);
   }
 
+  function toggleLandLayer(layer: string): void {
+    const next = new Set(hiddenLandLayers);
+    if (!next.delete(layer)) next.add(layer);
+    writeHiddenLandLayers(next);
+    setHiddenLandLayers(next);
+  }
+
   const mapRoutes: CandidateRouteView[] = tab === "today" ? candidates : [];
   const needStates = (needsQ.data ?? []) as NeedStateView[];
 
@@ -784,6 +794,8 @@ export function PlannerPage(props: { user: PageUser }): JSX.Element {
           signalAsOf={signalArchive.asOf}
           onToggleSignal={toggleSignal}
           onSignalCarrier={chooseSignalCarrier}
+          hiddenLandLayers={hiddenLandLayers}
+          onToggleLandLayer={toggleLandLayer}
           position={tripQ.data?.position ?? null}
           origin={
             tripQ.data

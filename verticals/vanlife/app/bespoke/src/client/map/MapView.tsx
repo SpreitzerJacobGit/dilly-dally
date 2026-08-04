@@ -8,10 +8,12 @@ import {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle, initMapLibre } from "@elements/shell-map-view/client";
+import { useTileArchivePresent } from "../lib/tileStatus.js";
 import {
   CATEGORY_COLORS,
   DEFAULT_SIGNAL_CARRIER,
   isSignalCarrier,
+  LAND_COLORS,
   PROJECTED_COLOR,
   ROLE_COLORS,
   SIGNAL_COLORS,
@@ -40,6 +42,42 @@ const SIGNAL_SOURCE = "cell-signal";
 const SIGNAL_LAYER = "cell-signal-fill";
 const SIGNAL_PMTILES_URL = "pmtiles:///tiles/cell-signal.pmtiles";
 const SIGNAL_SOURCE_LAYER = "coverage";
+
+/**
+ * The legal-camping overlay: a second PMTiles archive on the same volume,
+ * prepared out of band by deploy/prepare-legal-overlay.ps1.
+ *
+ * Separate from the basemap because it is genuinely optional — the map is fully
+ * usable without it, and a van that has never run the overlay prep should see an
+ * ordinary map plus an honest "not installed" on the Status page, not a broken
+ * one. Nothing is added to the style until /tiles/status confirms the archive is
+ * actually there.
+ */
+const LEGAL_ARCHIVE = "legal-camping.pmtiles";
+const LEGAL_ARCHIVE_URL = `${ASSETS_URL}/${LEGAL_ARCHIVE}`;
+const LEGAL_SOURCE = "legal-land";
+/** Layer names inside the archive, set by -nln when it was built. */
+const LEGAL_BLM_LAYER = "blm_open_land";
+const LEGAL_USFS_LAYER = "usfs_legal_corridor";
+
+/** Keyed like LAND_COLORS, so the legend's checkboxes map straight onto layer ids. */
+const LEGAL_LAYER_IDS: Record<string, string[]> = {
+  blm: ["legal-blm-fill", "legal-blm-outline"],
+  usfs: ["legal-usfs-fill", "legal-usfs-outline"],
+};
+
+/**
+ * A corridor built from an assumed distance is drawn dashed, a published one
+ * solid. Same device as the draft Target ring above, for the same reason: the
+ * difference between "this is the rule" and "this is our best guess at the rule"
+ * has to survive being looked at quickly.
+ */
+const legalDashExpr = [
+  "case",
+  ["==", ["get", "confidence"], "default_buffer"],
+  ["literal", [2, 2]],
+  ["literal", [1, 0]],
+] as unknown as number[];
 
 function routesToGeojson(routes: CandidateRouteView[], highlightedId: number | null) {
   return {
@@ -161,6 +199,18 @@ export function MapView(props: MapViewProps): JSX.Element {
   const targetHandlesRef = useRef<Marker[]>([]);
   const [ready, setReady] = useState(false);
   const [basemapError, setBasemapError] = useState<string | null>(null);
+  const [legalError, setLegalError] = useState<string | null>(null);
+  /**
+   * Null until /tiles/status answers; false means the archive was never installed.
+   *
+   * Asking first is load-bearing, not tidiness. An unknown path under /tiles
+   * does not 404 — it falls through to the SPA's not-found handler and returns
+   * index.html with a 200, so pointing the style at a missing archive feeds
+   * MapLibre HTML where it expects PMTiles and yields a parse error on every
+   * pan. Confirming the file exists is the only way to tell "never installed"
+   * apart from "broken", and it keeps the former completely quiet.
+   */
+  const legalPresent = useTileArchivePresent(LEGAL_ARCHIVE);
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -189,6 +239,16 @@ export function MapView(props: MapViewProps): JSX.Element {
       if (e.sourceId === SIGNAL_SOURCE) {
         // eslint-disable-next-line no-console
         console.error("cell signal overlay error:", message);
+        return;
+      }
+      // The legal overlay is a second archive on the same volume, and its
+      // failures arrive through this one event too. Reporting them as a basemap
+      // problem would misdiagnose an optional layer as the map being broken —
+      // the operator would go looking at the wrong file.
+      if (e.sourceId === LEGAL_SOURCE) {
+        // eslint-disable-next-line no-console
+        console.error("legal overlay error:", message);
+        setLegalError((prev) => prev ?? message);
         return;
       }
       // eslint-disable-next-line no-console
@@ -348,6 +408,82 @@ export function MapView(props: MapViewProps): JSX.Element {
     if (!map || !ready) return;
     (map.getSource("pois") as GeoJSONSource | undefined)?.setData(poisToGeojson(props.pois));
   }, [props.pois, ready]);
+
+  /**
+   * Install the overlay under everything else. Added with a beforeId rather than
+   * by ordering the calls, because this runs whenever the status fetch resolves
+   * — which may be after the style's own layers already exist.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || legalPresent !== true) return;
+    if (map.getSource(LEGAL_SOURCE)) return;
+
+    map.addSource(LEGAL_SOURCE, { type: "vector", url: `pmtiles://${LEGAL_ARCHIVE_URL}` });
+
+    // Anchors are the bottom-most domain layer, so everything the planner draws
+    // keeps sitting on top of the legality wash.
+    const under = map.getLayer("targets-fill") ? "targets-fill" : undefined;
+    map.addLayer(
+      {
+        id: "legal-blm-fill",
+        type: "fill",
+        source: LEGAL_SOURCE,
+        "source-layer": LEGAL_BLM_LAYER,
+        paint: { "fill-color": LAND_COLORS.blm!, "fill-opacity": 0.15 },
+      },
+      under,
+    );
+    map.addLayer(
+      {
+        id: "legal-blm-outline",
+        type: "line",
+        source: LEGAL_SOURCE,
+        "source-layer": LEGAL_BLM_LAYER,
+        paint: { "line-color": LAND_COLORS.blm!, "line-width": 0.8, "line-opacity": 0.5 },
+      },
+      under,
+    );
+    map.addLayer(
+      {
+        id: "legal-usfs-fill",
+        type: "fill",
+        source: LEGAL_SOURCE,
+        "source-layer": LEGAL_USFS_LAYER,
+        paint: { "fill-color": LAND_COLORS.usfs!, "fill-opacity": 0.18 },
+      },
+      under,
+    );
+    map.addLayer(
+      {
+        id: "legal-usfs-outline",
+        type: "line",
+        source: LEGAL_SOURCE,
+        "source-layer": LEGAL_USFS_LAYER,
+        paint: {
+          "line-color": LAND_COLORS.usfs!,
+          "line-width": 1,
+          "line-opacity": 0.75,
+          "line-dasharray": legalDashExpr,
+        },
+      },
+      under,
+    );
+  }, [ready, legalPresent]);
+
+  // Legend toggles. Layout visibility rather than removing layers, so switching
+  // back on does not re-request tiles that are already in the cache.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || legalPresent !== true) return;
+    const hidden = props.hiddenLandLayers;
+    for (const [key, ids] of Object.entries(LEGAL_LAYER_IDS)) {
+      for (const id of ids) {
+        if (!map.getLayer(id)) continue;
+        map.setLayoutProperty(id, "visibility", hidden?.has(key) ? "none" : "visible");
+      }
+    }
+  }, [props.hiddenLandLayers, ready, legalPresent]);
 
   // DOM markers: numbered stops of the highlighted route + position pin.
   useEffect(() => {
@@ -614,6 +750,14 @@ export function MapView(props: MapViewProps): JSX.Element {
           <span className="vl-basemap-error-hint">
             Routes and stops below are unaffected. Check the tile archive on the van server.
           </span>
+        </div>
+      )}
+      {/* Only when the archive was advertised and then failed. A van that never
+          installed it says so on the Status page and stays quiet here. */}
+      {!basemapError && legalError && (
+        <div className="vl-legal-error" role="status">
+          <strong>Legal camping overlay unavailable</strong>
+          <span>Land is unshaded — that is missing data, not "no camping here".</span>
         </div>
       )}
     </div>

@@ -2,8 +2,9 @@
 
 `Dockerfile` and `compose.yaml` are generated from the assembly manifest — never edit them.
 This file, `prepare-data.ps1`, `refresh-cell-signal.ps1`,
-`install-cell-signal-schedule.ps1`, `build-cell-signal.ts`, `cell-signal-tiers.ts`, and the
-repository-root `.dockerignore` are authored and survive regeneration.
+`install-cell-signal-schedule.ps1`, `build-cell-signal.ts`, `cell-signal-tiers.ts`,
+`prepare-legal-overlay.ps1`, `build-forest-buffers.ts`, `forest-camping-distance.json`, and
+the repository-root `.dockerignore` are authored and survive regeneration.
 
 The build context is the repository root (`compose.yaml` → `build.context: ../../..`), so
 the root `.dockerignore` is load-bearing: without it every build ships the local scratch
@@ -97,6 +98,50 @@ against real data — each is flagged in the code at the point it matters:
   numeric IDs, which move with corporate restructuring. Anything unmatched is reported with
   counts on the first run — put the leftovers in `cell-signal-providers.json` as
   `{"<name or id>": "att"}` and re-run.
+## Legal camping overlay (optional)
+
+A second PMTiles archive on the same `vanlife-tiles` volume, shading where dispersed
+camping is permitted. Entirely optional: without it the map behaves normally, the legend
+offers no switches for it, and the Status page reports "Not installed".
+
+```
+powershell verticals/vanlife/deploy/prepare-legal-overlay.ps1 -SourceDir <scratch dir>
+```
+
+It downloads its own inputs (~1.2 GB total, cached in `-SourceDir`):
+
+- `Trans_MVUM_Road.gdb.zip` — https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Trans_MVUM_Road.gdb.zip
+  (note `data.fs.usda.gov`, not `www.` — the `www` path 404s)
+- `BLM_SMA_National.zip` — https://www.arcgis.com/sharing/rest/content/items/6bf2e737c59d4111be92420ee5ab0b46/data
+
+Notes:
+
+- **Docker Desktop is not on PATH for non-interactive shells**, and its credential helper
+  lives in the same directory. The script prepends `%ProgramFiles%\Docker\Docker\resources\bin`
+  itself; if you run these steps by hand, do the same or every pull fails with
+  "error getting credentials" rather than anything mentioning Docker.
+- GDAL must be the **full** image (`ubuntu-full-latest`). `alpine-small` has no GEOS, so
+  `ST_Buffer` silently yields nulls. GDAL 3.14 writes PMTiles directly, so there is no
+  tippecanoe step and no pmtiles binary needed on the host.
+- **This takes about three hours.** Measured on a first full run: ~2 min filter/reproject,
+  ~13 min buffer + dissolve (GEOS over ~110k road segments), ~8 min clip/simplify/makevalid,
+  and ~2.5 hours for the tiling pass, which is by far the slowest step. Start it and leave it.
+  GDAL warns that a few dense tiles exceeded 500 kB and were encoded at lower resolution;
+  that is the tiler degrading gracefully, not an error.
+- The finished archive is ~150 MB (z5–12, ~55k tiles) — small beside the 5 GB basemap on
+  the same volume.
+- Output is clipped to the same bbox as the basemap (`-125.5,31.0,-102.0,49.5`). Shading
+  legality where there is no basemap and no routing graph would claim coverage the rest of
+  the app does not have. Override with `-West/-South/-East/-North`.
+- Refresh seasonally or before a trip into new country — the source data changes about
+  annually and nothing polls it.
+
+**The camping distance is not in the source data.** The national MVUM roads dataset has no
+camping-distance attribute, so `forest-camping-distance.json` holds the distances that were
+actually looked up, each with the URL it came from. Forests absent from it are buffered at
+the 300 ft default and marked `default_buffer`, which the map draws with a dashed edge. To
+add a forest: find its official dispersed-camping or MVUM page, quote the distance, and add
+an entry keyed by its exact `FORESTNAME`. An entry with no `source` is rejected at build time.
 
 ## Run
 

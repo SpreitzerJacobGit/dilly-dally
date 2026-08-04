@@ -110,13 +110,24 @@ One screen: the map as the primary surface, with the Origin and Targets list, to
 `[MAP-5]` The Origin and every Target are visible on the map — areas as shaded regions, exact points as numbered pins with the final one marked — and selecting one in the list or on the map selects it in both and brings it into view.
 `[MAP-6]` Targets are created, moved, resized, reordered, narrowed, and deleted from the planning screen itself; no separate screen is needed to shape the route.
 
-## 10. Interest profile
+## 10. Legal camping overlay
+Where dispersed camping is permitted, shown as two separate land layers — BLM ownership and USFS road corridors — because they are different legal regimes and a single merged "legal" answer could not be audited. The overlay is optional data, prepared out of band; an installation without it behaves normally and says so.
+
+`[LEGAL-1]` The map can shade BLM open land and USFS forest-road camping corridors as two distinct layers, each switched on and off independently from the legend, with the choice remembered across reloads.
+`[LEGAL-2]` A corridor whose width is an assumed distance rather than a published one is drawn differently from one whose distance was actually looked up, and the legend says which is which — the application never presents an assumption as a published rule.
+`[LEGAL-3]` The legend states that unshaded land means "unverified", never "no camping here", and that the overlay is advisory rather than a guarantee.
+`[LEGAL-4]` The overlay is served by the application's own server from local data, so it renders with no internet connection, exactly like the base imagery.
+`[LEGAL-5]` An installation that has not built the overlay says so plainly on the status screen and offers no legend switches for it, rather than showing an empty layer that reads as "nowhere is legal".
+`[LEGAL-6]` The status screen reports when the overlay was built, how many forests have a published camping distance, and the assumed distance used everywhere else.
+`[LEGAL-7]` A failure to load the overlay is reported as an overlay problem and never as a basemap problem, so a broken optional layer cannot be mistaken for a broken map.
+
+## 11. Interest profile
 Side-quest suggestions are biased by configurable interest weights blended with popularity.
 
 `[PROF-1]` Category interest weights are editable and arrive seeded with defaults; changing a weight re-ranks side-quest suggestions the next time candidates are generated.
 `[PROF-2]` A category whose weight is set to zero produces no side-quest suggestions, no matter how popular its places are; among the rest, a heavily weighted category outranks a lightly weighted one of similar popularity.
 
-## 11. Daily digest
+## 12. Daily digest
 One digest each morning: progress, today's options, and what needs attention — with an important-only cut that is honest when nothing is important.
 
 `[DIG-1]` Each morning at the configured hour the application publishes exactly one digest for the day — never more than one, even across restarts — summarizing trip progress, today's candidates, and need deadlines within the next two days.
@@ -124,7 +135,7 @@ One digest each morning: progress, today's options, and what needs attention —
 `[DIG-3]` The morning digest is always readable on the planning screen as a dismissible banner, and dismissing it on one device does not dismiss it for the other operator.
 `[DIG-4]` Push delivery reports itself honestly: an unconfigured push channel shows "Not configured" while the in-app digest keeps working, and a failed delivery is visible with its error — the application never claims a digest was pushed that was not.
 
-## 12. Offline & remote
+## 13. Offline & remote
 The van server is the source of truth; the internet is optional.
 
 `[OFF-1]` With no internet connection, the planning screen still shows the current plan, need levels, and map, and plans can still be regenerated — only place refreshing and push delivery degrade, each reporting its state honestly.

@@ -107,6 +107,11 @@ export const VL_STYLES = `
   font-size: .85rem; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 .vl-basemap-error span { word-break: break-word; }
 .vl-basemap-error-hint { color: #6b5200; }
+/* Quieter than the basemap error: the map is fine, one optional overlay is not. */
+.vl-legal-error { position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 5; max-width: 380px; display: flex; flex-direction: column; gap: 2px;
+  background: #f1f5f9; border: 1px solid #94a3b8; border-radius: 8px; padding: 6px 10px;
+  font-size: .8rem; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 
 .vl-toast { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: #1f2937; color: #fff; border-radius: 8px; padding: 10px 14px; font-size: .9rem;
@@ -148,6 +153,16 @@ export const VL_STYLES = `
   border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
 .vl-legend-carrier select:disabled { color: #999; cursor: not-allowed; }
 .vl-legend-note { color: #777; font-style: italic; margin: 2px 0; }
+
+/* A land wash reads as an area, so its swatch is a square rather than the
+   line-tier bar or the place dot — the shape says which kind of thing it is
+   before the colour does. */
+.vl-landswatch { display: inline-block; width: 12px; height: 10px; border-radius: 2px;
+  margin-right: 4px; opacity: .55; border: 1px solid rgba(0,0,0,.35); }
+/* Distinct from the grey .vl-legend-note above: that one says a layer cannot be
+   drawn, this one qualifies a layer that is drawn. Both sit in the legend at
+   once, so they cannot share a class — the amber is the "read this" tone. */
+.vl-legend-advisory { color: #6b5200; font-size: .72rem; line-height: 1.3; margin: 4px 0 2px; }
 
 .vl-popover { position: absolute; z-index: 10; top: 12px; right: 12px; width: 260px;
   background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px;

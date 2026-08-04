@@ -128,6 +128,37 @@ export const DEFAULT_SIGNAL_CARRIER = "best";
  */
 export const SIGNAL_SOURCE_LABEL = "FCC carrier-reported coverage — modelled, not measured";
 
+/**
+ * Land where dispersed camping is permitted, drawn as a wash under everything else.
+ *
+ * Deliberately outside the greens, teals and ambers: those are spoken for by the
+ * route tiers and the place categories, and a legality wash sitting under a
+ * campground dot must not read as more of the same thing. Tan and olive are the
+ * two unclaimed families left, and both survive being flattened to ~15% opacity
+ * over the basemap.
+ *
+ * Keyed the way CATEGORY_COLORS is, because the legend walks these keys too.
+ */
+export const LAND_COLORS: Record<string, string> = {
+  blm: "#c2a878", // tan
+  usfs: "#7d8c4a", // olive
+};
+
+export const LAND_LABELS: Record<string, string> = {
+  blm: "BLM open land",
+  usfs: "Forest road corridor",
+};
+
+export const ALL_LAND_LAYERS: string[] = Object.keys(LAND_COLORS);
+
+export function landColor(layer: string): string {
+  return LAND_COLORS[layer] ?? "#64748b";
+}
+
+export function landLabel(layer: string): string {
+  return LAND_LABELS[layer] ?? layer;
+}
+
 export function roleColor(tier: string): string {
   return ROLE_COLORS[tier] ?? "#64748b";
 }
